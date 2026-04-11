@@ -1,4 +1,7 @@
 import React, { useState, useEffect } from 'react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
+import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc } from 'firebase/firestore';
 import { 
   Home, Users, Calendar, FileText, Trophy, Map, Menu, X, MapPin, Download,
   Search, Filter, ChevronLeft, UserSquare, TrendingUp, Briefcase,
@@ -11,6 +14,30 @@ import {
   Printer, CreditCard, BookOpen, ToggleRight, ToggleLeft, ExternalLink, Globe, UserCheck
 } from 'lucide-react';
 
+// --- FIREBASE INITIALIZATION SAFE WRAPPER ---
+let app, auth, db, appId = 'pkh-tapin-master';
+try {
+  if (typeof __firebase_config !== 'undefined') {
+    app = initializeApp(JSON.parse(__firebase_config));
+    auth = getAuth(app);
+    db = getFirestore(app);
+    appId = typeof __app_id !== 'undefined' ? __app_id : 'pkh-tapin-master';
+  } else if (import.meta && import.meta.env && import.meta.env.VITE_FIREBASE_API_KEY) {
+    app = initializeApp({
+      apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+      authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+      projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+      storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+      messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+      appId: import.meta.env.VITE_FIREBASE_APP_ID
+    });
+    auth = getAuth(app);
+    db = getFirestore(app);
+  }
+} catch (error) {
+  console.warn("Firebase tidak diinisialisasi. Berjalan dalam mode Local Only.");
+}
+
 const getAppIcon = (nama) => {
   const n = nama.toLowerCase();
   if (n.includes('siks') || n.includes('data')) return <Database className="w-8 h-8 text-blue-600 mb-2" />;
@@ -21,53 +48,55 @@ const getAppIcon = (nama) => {
 };
 
 export default function App() {
+  // --- REAL-TIME AUTH & DB STATES ---
+  const [firebaseUser, setFirebaseUser] = useState(null);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [selectedKPM, setSelectedKPM] = useState(null);
-  
-  // --- ROLE & IDENTITAS ---
-  const [userRole, setUserRole] = useState('ketuatim_kab');
-  const isKorkab = userRole === 'ketuatim_kab';
-  const isKorcam = userRole === 'ketuatim_kec';
-  
-  let currentUser = { nama: 'Ahmad', role: 'Pendamping PKH', kec: 'Sukamaju', desa: 'Sukamaju' };
-  if (isKorcam) currentUser = { nama: 'Ibu Ketua Tim Kec', role: 'Ketua Tim Kecamatan', kec: 'Sukamaju', desa: 'Semua Desa' };
-  else if (isKorkab) currentUser = { nama: 'Bapak Ketua Tim Kab', role: 'Ketua Tim Kabupaten', kec: 'Kabupaten Tapin', desa: 'Semua Desa' };
-
-  const getCurrentDate = () => new Date().toISOString().split('T')[0];
-  const getCurrentTime = () => { const d = new Date(); return `${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`; };
-
-  const dataWilayah = { 'Sukamaju': ['Sukamaju', 'Sukamulya', 'Mekar Jaya'], 'Cibereum': ['Cibereum', 'Cibadak', 'Sukamandi'], 'Binuang': ['Binuang', 'Tungkap', 'Pualam Sari'] };
-  const [selectedFormKec, setSelectedFormKec] = useState('Sukamaju');
   const [toastMessage, setToastMessage] = useState(null);
   const showToast = (msg) => { setToastMessage(msg); setTimeout(() => setToastMessage(null), 3000); };
 
-  // --- STATE GLOBAL & MODALS ---
+  // --- DYNAMIC DATA STATES (Synced to Firestore) ---
+  const [sdmData, setSdmData] = useState([
+    { id: 'admin1', nama: 'Bapak Ketua Tim Kab', role: 'ketuatim_kab', kecamatan: 'Kabupaten Tapin', desa: 'Semua', jmlKpm: 0, status: 'Aktif' },
+    { id: 'sdm1', nama: 'Ahmad', role: 'pendamping', kecamatan: 'Sukamaju', desa: 'Sukamaju', jmlKpm: 124, status: 'Aktif' },
+    { id: 'sdm2', nama: 'Rina', role: 'pendamping', kecamatan: 'Sukamaju', desa: 'Sukamulya', jmlKpm: 200, status: 'Aktif' }
+  ]);
+  const [kpmData, setKpmData] = useState([
+    { id: 'kpm1', nama: 'Siti Aminah', nik: '320101...', noKKS: '1234-5678', umur: 45, bantuan: 'PKH & Sembako', kecamatan: 'Sukamaju', desa: 'Sukamaju', pendampingId: 'Ahmad', targetGraduasi: '2026', masaKepesertaan: 'Tahap 1 / 2016', tahapValidasiTerakhir: 'Tahap 2 / 2026', usaha: 'Warung Kelontong', ppse: 'Aktif', keluarga: [{nama: 'Budi (Suami)', umur: 48}], komponen: { pendidikan: [{nama: 'Ani', sekolah: 'SDN 1'}], kesehatan: [], kesos: [] } }
+  ]);
+
+  // --- ROLE & LOGIN SELECTION ---
+  // Akses login ditarik otomatis dari data SDM yang diimport oleh Admin!
+  const [selectedUserId, setSelectedUserId] = useState('admin1');
+  const currentUserData = sdmData.find(s => s.id === selectedUserId) || sdmData[0];
+  const userRole = currentUserData.role;
+  const isKorkab = userRole === 'ketuatim_kab';
+  const isKorcam = userRole === 'ketuatim_kec';
+  
+  const getCurrentDate = () => new Date().toISOString().split('T')[0];
+  const getCurrentTime = () => { const d = new Date(); return `${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`; };
+  const dataWilayah = { 'Sukamaju': ['Sukamaju', 'Sukamulya', 'Mekar Jaya'], 'Cibereum': ['Cibereum', 'Cibadak', 'Sukamandi'], 'Binuang': ['Binuang', 'Tungkap', 'Pualam Sari'] };
+  const [selectedFormKec, setSelectedFormKec] = useState('Sukamaju');
+
+  // --- COMPONENT STATES ---
+  const [selectedKPM, setSelectedKPM] = useState(null);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [uploadState, setUploadState] = useState('idle'); 
   const [uploadType, setUploadType] = useState('kpm'); 
   const [showExportModal, setShowExportModal] = useState(false);
-  const [exportTarget, setExportTarget] = useState('');
   const [resetTarget, setResetTarget] = useState('ALL'); 
   const [aturanPiket, setAturanPiket] = useState({ jamMulai: '08:00', jamSelesai: '16:00', denda: 50000 });
 
-  // --- STATE: Aplikasi Eksternal ---
-  const [aplikasiEksternal, setAplikasiEksternal] = useState([
-    { id: 1, nama: 'SIKS-NG KEMENSOS', url: 'https://siks.kemensos.go.id' },
-    { id: 2, nama: 'E-PKH', url: 'https://epkh.kemensos.go.id' }
-  ]);
+  const [aplikasiEksternal, setAplikasiEksternal] = useState([{ id: 1, nama: 'SIKS-NG KEMENSOS', url: 'https://siks.kemensos.go.id' }]);
   const [showAddAppModal, setShowAddAppModal] = useState(false);
 
-  // --- STATE KPM ---
   const [kpmMainTab, setKpmMainTab] = useState('daftar'); 
   const [kpmDetailTab, setKpmDetailTab] = useState('profil');
-  const [showGraduasiStats, setShowGraduasiStats] = useState(false); 
-  const [kpmPotensialData, setKpmPotensialData] = useState([{ id: 1, kpmId: 1, nama: 'Siti Aminah', nik: '320101...', kecamatan: 'Sukamaju', desa: 'Sukamaju', potensi: 'Usaha Tani Sayur', pendampingId: 'Ahmad' }]);
+  const [kpmPotensialData, setKpmPotensialData] = useState([]);
   const [showPotensialModal, setShowPotensialModal] = useState(false);
-  const [kpmGraduasiData, setKpmGraduasiData] = useState([{ id: 4, kpmId: 4, nama: 'Suhartini', nik: '320401...', kecamatan: 'Cibereum', desa: 'Cibereum', status: 'Sudah Graduasi', keterangan: 'Lulus PENA 2025', pendampingId: 'Joko' }]);
+  const [kpmGraduasiData, setKpmGraduasiData] = useState([]);
   const [showGraduasiModal, setShowGraduasiModal] = useState(false);
 
-  // --- STATE AGENDA, PIKET, DEADLINE ---
   const [agendaSubTab, setAgendaSubTab] = useState('harian'); 
   const [agendaHarian, setAgendaHarian] = useState([{ id: 1, title: 'P2K2 Desa Sukamaju', date: getCurrentDate(), time: '10:00', loc: 'Balai Desa', pic: 'Ahmad', kecamatan: 'Sukamaju', supervisi: false }]);
   const [agendaKetuaTim, setAgendaKetuaTim] = useState([{ id: 1, title: 'Rakor Dinas Sosial', date: getCurrentDate(), time: '09:00', loc: 'Ruang Rapat' }]);
@@ -78,18 +107,16 @@ export default function App() {
   const [absenStatus, setAbsenStatus] = useState('belum'); 
   const [jamDatang, setJamDatang] = useState(null);
   const [denda, setDenda] = useState(false);
-  const [piketBulanIni, setPiketBulanIni] = useState([{ id: 1, tgl: '10 Apr (Jumat)', nama: 'Ahmad, Rina', status: 'today' }, { id: 2, tgl: '13 Apr (Senin)', nama: 'Joko, Lina', status: 'future' }]);
-  const [pengajuanTukar, setPengajuanTukar] = useState([{ id: 1, pengaju: 'Rina', tglAwal: '10 Apr (Jumat)', tglTujuan: '13 Apr (Senin)', status: 'pending' }]);
+  const [piketBulanIni, setPiketBulanIni] = useState([{ id: 1, tgl: '10 Apr (Jumat)', nama: 'Ahmad, Rina', status: 'today' }]);
+  const [pengajuanTukar, setPengajuanTukar] = useState([]);
   const [showTukarModal, setShowTukarModal] = useState(false);
   const [showLiburModal, setShowLiburModal] = useState(false);
   const [showGeneratorModal, setShowGeneratorModal] = useState(false);
   const [generatorStep, setGeneratorStep] = useState(0);
 
-  // --- STATE CATATAN HARIAN ---
   const [catatanHarianData, setCatatanHarianData] = useState([{ id: 1, tanggal: getCurrentDate(), jam: '08:30', kecamatan: 'Sukamaju', desa: 'Sukamaju', tentang: 'Koordinasi Balai Desa', role: 'Pendamping PKH', nama: 'Ahmad' }]);
   const [showCatatanModal, setShowCatatanModal] = useState(false);
 
-  // --- STATE TUGAS, VOTE ---
   const [tugasTab, setTugasTab] = useState('daftar'); 
   const [selectedTaskView, setSelectedTaskView] = useState(null);
   const [selectedVoteView, setSelectedVoteView] = useState(null);
@@ -98,16 +125,11 @@ export default function App() {
   const [voteResults, setVoteResults] = useState({ 'v1': { 'Ayam Bakar': 15, 'Ikan Nila': 5, 'Sate': 2 } });
   const [tasksData, setTasksData] = useState([{ id: 't1', title: 'Pendataan Ulang Disabilitas', target: 'Semua Pendamping', targetCode: 'all', desc: 'Mohon mengecek ulang data disabilitas.', linkId: '001', color: 'indigo' }]);
   const [votesData, setVotesData] = useState([{ id: 'v1', title: 'Menu Makan Siang Rakor', status: 'AKTIF', desc: 'Pilih menu makanan.', linkId: 'v001', options: ['Ayam Bakar', 'Ikan Nila', 'Sate'] }]);
-  const [tugasProgress, setTugasProgress] = useState({ 't1': { target: 5000, realisasi: 3500, userRealisasi: { 'Ahmad': 124, 'Rina': 80, 'Joko': 150 } } });
+  const [tugasProgress, setTugasProgress] = useState({ 't1': { target: 5000, realisasi: 3500, userRealisasi: { 'Ahmad': 124, 'Rina': 80 } } });
   const [showTambahTugasModal, setShowTambahTugasModal] = useState(false);
   const [showTambahVoteModal, setShowTambahVoteModal] = useState(false);
   const [showLaporTugasModal, setShowLaporTugasModal] = useState(false);
-  const [selectedTugasToLapor, setSelectedTugasToLapor] = useState(null);
-  
-  // --- STATE LAPORAN ---
-  const [laporanTab, setLaporanTab] = useState('input');
 
-  // --- STATE MONITORING & PENGADUAN ---
   const [monitoringSubTab, setMonitoringSubTab] = useState('p2k2');
   const [selectedMonitoringEvent, setSelectedMonitoringEvent] = useState(null);
   const [pengaduanData, setPengaduanData] = useState([{ id: 1, nama: 'Siti Aminah', nik: '320101...', tanggal: getCurrentDate(), jam: '09:30', kecamatan: 'Sukamaju', isi: 'Bantuan sembako belum masuk.', tindakLanjut: 'Sedang dicek ke Bank.', status: 'Diproses', petugas: 'Ahmad' }]);
@@ -115,35 +137,63 @@ export default function App() {
   const [showTindakLanjutModal, setShowTindakLanjutModal] = useState(false);
   const [selectedPengaduan, setSelectedPengaduan] = useState(null);
 
-  // --- STATE PENGATURAN ---
   const [settingTab, setSettingTab] = useState('profil'); 
+  const [laporanTab, setLaporanTab] = useState('input');
 
-  // --- DUMMY MASTER DATA ---
-  const kpmData = [
-    { id: 1, nama: 'Siti Aminah', nik: '320101...', noKKS: '1234-5678-9012-3456', umur: 45, bantuan: 'PKH & Sembako', kecamatan: 'Sukamaju', desa: 'Sukamaju', pendampingId: 'Ahmad', targetGraduasi: '2026', masaKepesertaan: 'Tahap 1 / 2016', tahapValidasiTerakhir: 'Tahap 2 / 2026', usaha: 'Warung Kelontong', ppse: 'Aktif', keluarga: [{nama: 'Budi (Suami)', umur: 48, nik: '32011...'}], komponen: { pendidikan: [{nama: 'Ani', umur: 10, kelas: '4 SD', sekolah: 'SDN 1'}], kesehatan: [{nama: 'Rizky', umur: 2, tempatPeriksa: 'Posyandu'}], kesos: [] } },
-    { id: 2, nama: 'Budi Santoso', nik: '320202...', noKKS: '1234-5678-9012-7788', umur: 60, bantuan: 'Sembako', kecamatan: 'Sukamaju', desa: 'Sukamaju', pendampingId: 'Rina', targetGraduasi: '-', masaKepesertaan: 'Tahap 3 / 2020', tahapValidasiTerakhir: 'Tahap 2 / 2026', usaha: 'Buruh Tani', ppse: 'Tidak MS', keluarga: [], komponen: { pendidikan: [], kesehatan: [], kesos: [{nama: 'Budi (Lansia)', umur: 60, tempatPeriksa: 'Puskesmas'}] } }
-  ];
-  const rankingData = [
-    { id: 1, nama: 'Ahmad', poin: 450, level: 'Pendamping Ahli' }, 
-    { id: 2, nama: 'Rina', poin: 420, level: 'Pendamping Madya' }
-  ];
-  const sdmData = [
-    { id: 'sdm1', nama: 'Ahmad', nik: '63010...', role: 'Pendamping PKH', kecamatan: 'Sukamaju', jmlKpm: 124, status: 'Aktif', tugas: 2 }, 
-    { id: 'sdm2', nama: 'Rina', nik: '63011...', role: 'Pendamping PKH', kecamatan: 'Sukamaju', jmlKpm: 200, status: 'Aktif', tugas: 2 }, 
-    { id: 'sdm6', nama: 'Ibu Ketua Tim Kec', nik: '63015...', role: 'Ketua Tim Kecamatan', kecamatan: 'Sukamaju', jmlKpm: 25, status: 'Aktif', tugas: 5 }
-  ];
-
-  // --- FILTERING GLOBAL ---
-  const getFilteredKPM = (data) => { if (isKorkab) return data; if (isKorcam) return data.filter(k => k.kecamatan === currentUser.kec); return data.filter(k => k.pendampingId === currentUser.nama); };
-  const getFilteredAgenda = (data) => { if (isKorkab) return data; if (isKorcam) return data.filter(a => a.kecamatan === currentUser.kec); return data.filter(a => a.pic === currentUser.nama); };
-  const getFilteredSDM = () => { if (isKorkab) return sdmData; if (isKorcam) return sdmData.filter(s => s.kecamatan === currentUser.kec); return sdmData; };
-
-  // --- SYNC LOGIC ---
+  // --- FIREBASE REALTIME SYNC EFFECTS ---
   useEffect(() => {
-    if (!isKorkab && activeTab === 'ranking') setActiveTab('dashboard'); 
-    if (!isKorkab && activeTab === 'pengaturan' && settingTab === 'sistem') setSettingTab('profil');
-    if (isKorkab) setSelectedFormKec('Sukamaju'); else setSelectedFormKec(currentUser.kec); 
-  }, [userRole, activeTab, settingTab, isKorkab, currentUser.kec]);
+    if (!auth) return;
+    const initAuth = async () => {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) await signInWithCustomToken(auth, __initial_auth_token);
+        else await signInAnonymously(auth);
+      } catch (e) { console.error(e); }
+    };
+    initAuth();
+    const unsub = onAuthStateChanged(auth, user => setFirebaseUser(user));
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    if (!db || !firebaseUser) return;
+    
+    // Real-time Sync SDM (Akun dibuat lewat Import)
+    const sdmRef = collection(db, 'artifacts', appId, 'public', 'data', 'sdmData');
+    const unsubSdm = onSnapshot(sdmRef, (snap) => {
+      if(!snap.empty) {
+        const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        setSdmData(data);
+      }
+    });
+
+    // Real-time Sync KPM (KPM dibuat lewat Import)
+    const kpmRef = collection(db, 'artifacts', appId, 'public', 'data', 'kpmData');
+    const unsubKpm = onSnapshot(kpmRef, (snap) => {
+      if(!snap.empty) {
+        const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        setKpmData(data);
+      }
+    });
+
+    return () => { unsubSdm(); unsubKpm(); };
+  }, [firebaseUser]);
+
+  // --- FILTERING HELPER ---
+  const getFilteredKPM = (data) => { 
+    if (isKorkab) return data; 
+    if (isKorcam) return data.filter(k => k.kecamatan === currentUserData.kecamatan); 
+    return data.filter(k => k.pendampingId === currentUserData.nama); 
+  };
+  const getFilteredAgenda = (data) => { 
+    if (isKorkab) return data; 
+    if (isKorcam) return data.filter(a => a.kecamatan === currentUserData.kecamatan); 
+    return data.filter(a => a.pic === currentUserData.nama); 
+  };
+  const getFilteredSDM = () => { 
+    if (isKorkab) return sdmData; 
+    if (isKorcam) return sdmData.filter(s => s.kecamatan === currentUserData.kecamatan); 
+    return sdmData; 
+  };
 
   const goToMenu = (mainMenu, subMenu = null) => {
     setActiveTab(mainMenu);
@@ -160,24 +210,41 @@ export default function App() {
   };
 
   // ==========================================
+  // --- UPLOAD IMPORT SIMULATION (REAL-TIME DB WRITE) ---
+  // ==========================================
+  const handleSimulateImport = async () => {
+    setUploadState('uploading');
+    try {
+      if (db) {
+        if (uploadType === 'sdm') {
+          // Sistem membuat akun otomatis saat Admin import SDM
+          const newSdm = { nama: 'Pendamping Baru', role: 'pendamping', kecamatan: 'Cibereum', desa: 'Cibadak', jmlKpm: 0, status: 'Aktif' };
+          await setDoc(doc(collection(db, 'artifacts', appId, 'public', 'data', 'sdmData')), newSdm);
+        } else if (uploadType === 'kpm') {
+          const newKpm = { nama: 'KPM Baru Import', nik: '320999...', noKKS: '-', umur: 50, bantuan: 'PKH', kecamatan: 'Sukamaju', desa: 'Sukamulya', pendampingId: 'Ahmad', targetGraduasi: '2027', masaKepesertaan: 'Tahap 1 / 2026', tahapValidasiTerakhir: 'Tahap 1 / 2026', usaha: '-', ppse: 'Calon', keluarga: [], komponen: { pendidikan: [], kesehatan: [], kesos: [] } };
+          await setDoc(doc(collection(db, 'artifacts', appId, 'public', 'data', 'kpmData')), newKpm);
+        }
+      }
+      setTimeout(() => {
+        setUploadState('result');
+      }, 1500);
+    } catch (e) {
+      console.error(e);
+      setTimeout(() => setUploadState('result'), 1500);
+    }
+  };
+
+  // ==========================================
   // --- VIEWS COMPONENTS ---
   // ==========================================
   
   const renderNavigation = () => {
     const navItems = [
-      { id: 'dashboard', icon: Home, label: 'Beranda' }, 
-      { id: 'catatan', icon: BookOpen, label: 'Catatan Harian' }, 
-      { id: 'kpm', icon: Users, label: 'Data KPM' },
-      { id: 'agenda', icon: Calendar, label: 'Agenda & Piket' }, 
-      { id: 'monitoring', icon: ClipboardList, label: 'Monitoring KPM' }, 
-      { id: 'tugas', icon: ClipboardCheck, label: 'Tugas & Voting' },
-      { id: 'pengaduan', icon: MessageSquare, label: 'Pengaduan / Laporan' }, 
-      { id: 'laporan', icon: FileText, label: 'Laporan & Denda' }, 
-      { id: 'sdm', icon: Shield, label: 'Database SDM' }, 
-      { id: 'aplikasi_lainnya', icon: ExternalLink, label: 'Aplikasi Terkait' }, 
-      ...(isKorkab ? [{ id: 'ranking', icon: Trophy, label: 'Ranking SDM' }] : []),
-      { id: 'peta', icon: Map, label: 'Peta Lokasi' }, 
-      { id: 'pengaturan', icon: Settings, label: 'Pengaturan' }
+      { id: 'dashboard', icon: Home, label: 'Beranda' }, { id: 'catatan', icon: BookOpen, label: 'Catatan Harian' }, { id: 'kpm', icon: Users, label: 'Data KPM' },
+      { id: 'agenda', icon: Calendar, label: 'Agenda & Piket' }, { id: 'monitoring', icon: ClipboardList, label: 'Monitoring KPM' }, { id: 'tugas', icon: ClipboardCheck, label: 'Tugas & Voting' },
+      { id: 'pengaduan', icon: MessageSquare, label: 'Pengaduan / Laporan' }, { id: 'laporan', icon: FileText, label: 'Laporan & Denda' }, { id: 'sdm', icon: Shield, label: 'Database SDM' }, 
+      { id: 'aplikasi_lainnya', icon: ExternalLink, label: 'Aplikasi Terkait' }, ...(isKorkab ? [{ id: 'ranking', icon: Trophy, label: 'Ranking SDM' }] : []),
+      { id: 'peta', icon: Map, label: 'Peta Lokasi' }, { id: 'pengaturan', icon: Settings, label: 'Pengaturan' }
     ];
     return (
       <nav className="flex flex-col space-y-1 mt-4 pb-6">
@@ -191,22 +258,17 @@ export default function App() {
   };
 
   const renderDashboard = () => {
-    const dbKpmFiltered = getFilteredKPM(kpmData);
-    const wTotalKPM = dbKpmFiltered.length;
-    const mTotalKPM = kpmData.filter(k => k.pendampingId === currentUser.nama).length;
+    const wTotalKPM = getFilteredKPM(kpmData).length;
+    const mTotalKPM = kpmData.filter(k => k.pendampingId === currentUserData.nama).length;
     const piketToday = piketBulanIni.find(p => p.status === 'today');
-    const myPiket = piketBulanIni.filter(p => p.nama.includes(currentUser.nama.split(' ')[0]));
+    const myPiket = piketBulanIni.filter(p => p.nama.includes(currentUserData.nama.split(' ')[0]));
 
     return (
       <div className="space-y-4 animate-in fade-in">
-        <div className="bg-gradient-to-r from-blue-600 to-blue-800 rounded-xl p-6 text-white shadow-lg relative overflow-hidden">
-          <h2 className="text-2xl font-bold">Halo, {currentUser.nama}!</h2>
-          <p className="text-blue-100">{currentUser.role} {isKorkab ? 'Kabupaten Tapin' : currentUser.kec}</p>
-          {(isKorkab || isKorcam) && (
-            <div className="mt-4 flex justify-between items-end border-t border-blue-500 pt-4">
-              <div><p className="text-sm text-blue-100">Total Poin Kinerja</p><p className="text-3xl font-bold">4.250 Pts</p></div><Trophy className="w-10 h-10 text-yellow-300 opacity-80" />
-            </div>
-          )}
+        <div className="bg-gradient-to-r from-blue-600 to-blue-800 rounded-xl p-6 text-white shadow-lg">
+          <h2 className="text-2xl font-bold">Halo, {currentUserData.nama}!</h2>
+          <p className="text-blue-100">{currentUserData.role === 'ketuatim_kab' ? 'Admin Kabupaten' : currentUserData.role}</p>
+          {isKorkab && (<div className="mt-4 flex justify-between items-end border-t border-blue-500 pt-4"><div><p className="text-sm text-blue-100">Total Poin Kinerja</p><p className="text-3xl font-bold">4.250 Pts</p></div><Trophy className="w-10 h-10 text-yellow-300 opacity-80" /></div>)}
         </div>
 
         <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
@@ -225,7 +287,6 @@ export default function App() {
           {(isKorkab || isKorcam) && (<div className="bg-white rounded-xl shadow-sm border border-blue-200 p-4"><p className="text-[10px] font-bold text-blue-600 uppercase mb-1">Total KPM Wilayah</p><p className="text-2xl font-black text-blue-800">{wTotalKPM}</p></div>)}
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4"><p className="text-[10px] font-bold text-gray-600 uppercase mb-1">KPM Dampingan Anda</p><p className="text-2xl font-black text-gray-800">{mTotalKPM}</p></div>
         </div>
-        <button onClick={() => goToMenu('kpm')} className="w-full text-xs text-blue-600 font-bold py-3 bg-blue-50 border border-blue-200 rounded-lg shadow-sm hover:bg-blue-100 transition-colors">Lihat Detail KPM</button>
 
         <h3 className="font-bold text-gray-800 mt-6 mb-2 flex items-center"><Activity className="w-5 h-5 mr-2 text-indigo-600"/> Pusat Informasi</h3>
         
@@ -249,60 +310,8 @@ export default function App() {
             <div onClick={() => goToMenu('agenda', 'deadline')} className="bg-white p-3 rounded-xl shadow-sm border-b-4 border-orange-500 cursor-pointer hover:-translate-y-1 transition transform"><Timer className="w-6 h-6 text-orange-500 mb-2" /><p className="text-[10px] text-gray-500 uppercase font-bold">Deadline Tugas</p><p className="text-sm font-bold text-gray-800 mt-1 line-clamp-1">{deadlineData.length > 0 ? deadlineData[0].title : 'Aman'}</p></div>
           </div>
           
-          <div onClick={() => goToMenu('tugas', 'progres')} className="bg-white border-l-4 border-indigo-500 p-4 rounded-xl cursor-pointer hover:bg-indigo-50 transition flex items-center justify-between shadow-sm"><div className="flex items-center"><div className="bg-indigo-100 p-2 rounded-lg mr-3"><ClipboardCheck className="w-6 h-6 text-indigo-600" /></div><div><p className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider mb-0.5">Tugas Direktif</p><p className="text-sm font-bold text-gray-800">{tasksData.length} Berjalan</p></div></div><ChevronRight className="w-5 h-5 text-gray-400" /></div>
-          <div onClick={() => goToMenu('tugas', 'vote')} className="bg-white border-l-4 border-purple-500 p-4 rounded-xl cursor-pointer hover:bg-purple-50 transition flex items-center justify-between shadow-sm mb-4"><div className="flex items-center"><div className="bg-purple-100 p-2 rounded-lg mr-3"><BarChart2 className="w-6 h-6 text-purple-600" /></div><div><p className="text-[10px] font-bold text-purple-600 uppercase tracking-wider mb-0.5">Voting / Polling</p><p className="text-sm font-bold text-gray-800">{votesData.length} Polling</p></div></div><ChevronRight className="w-5 h-5 text-gray-400" /></div>
-        </div>
-      </div>
-    );
-  };
-
-  const renderCatatanHarian = () => {
-    const displayCatatan = catatanHarianData.filter(c => c.nama === currentUser.nama);
-    const handleSimpanCatatan = (e) => {
-      e.preventDefault();
-      const newCatatan = { id: Date.now(), tanggal: e.target.tanggal.value, jam: e.target.jam.value, kecamatan: e.target.kecamatan.value, desa: e.target.desa.value, tentang: e.target.tentang.value, role: currentUser.role, nama: currentUser.nama };
-      setCatatanHarianData([newCatatan, ...catatanHarianData]);
-      setShowCatatanModal(false); showToast("Catatan harian berhasil disimpan!");
-    };
-    return (
-      <div className="space-y-4 animate-in fade-in">
-        <div className="bg-gradient-to-r from-blue-500 to-blue-700 rounded-xl p-5 text-white shadow-md"><h2 className="text-lg font-bold flex items-center"><BookOpen className="w-5 h-5 mr-2"/> Buku Catatan Harian</h2><p className="text-xs text-blue-100 mt-1">100% Privat untuk akun Anda.</p></div>
-        <button onClick={() => setShowCatatanModal(true)} className="w-full py-3 bg-white border-2 border-dashed border-blue-400 text-blue-600 rounded-xl font-bold flex items-center justify-center shadow-sm hover:bg-blue-50 transition-colors"><Plus className="w-5 h-5 mr-1" /> Tambah Catatan Baru</button>
-        <div className="space-y-3">
-          {displayCatatan.map(c => (
-            <div key={c.id} className="bg-white p-4 rounded-xl shadow-sm border-l-4 border-blue-500 border-y border-r border-gray-100">
-              <div className="flex justify-between items-start mb-2"><span className="text-[10px] font-bold bg-blue-100 text-blue-700 px-2 py-1 rounded-full">{c.tanggal} • {c.jam} WIB</span></div>
-              <p className="text-sm font-bold text-gray-800 flex items-center"><MapPin className="w-3 h-3 mr-1 text-gray-400"/> {c.kecamatan} - {c.desa}</p>
-              <p className="text-sm text-gray-600 mt-2 bg-gray-50 p-2 rounded border border-gray-100">{c.tentang}</p>
-            </div>
-          ))}
-          {displayCatatan.length === 0 && <p className="text-center text-gray-500 text-sm py-4">Belum ada catatan harian untuk akun Anda.</p>}
-        </div>
-
-        {showCatatanModal && (
-          <div className="fixed inset-0 z-[70] flex items-center justify-center p-4"><div className="absolute inset-0 bg-black/60" onClick={() => setShowCatatanModal(false)}></div><div className="bg-white rounded-xl shadow-2xl w-full max-w-sm relative z-10 p-6"><h3 className="font-bold text-lg text-gray-800 mb-4">Form Catatan Harian</h3><form onSubmit={handleSimpanCatatan} className="space-y-3"><div className="bg-blue-50 p-2 rounded border border-blue-100 mb-2"><label className="block text-[10px] font-bold text-blue-600 uppercase mb-1">Nama Petugas (Auto)</label><p className="text-sm font-bold text-blue-800">{currentUser.nama}</p></div><div className="grid grid-cols-2 gap-2"><div><label className="block text-xs font-bold text-gray-600 mb-1">Tanggal</label><input name="tanggal" required type="date" defaultValue={getCurrentDate()} readOnly className="w-full p-2 border rounded-lg text-sm bg-gray-100 outline-none"/></div><div><label className="block text-xs font-bold text-gray-600 mb-1">Jam</label><input name="jam" required type="time" defaultValue={getCurrentTime()} readOnly className="w-full p-2 border rounded-lg text-sm bg-gray-100 outline-none"/></div></div><div className="grid grid-cols-2 gap-2"><div><label className="block text-xs font-bold text-gray-600 mb-1">Kecamatan</label><select name="kecamatan" required value={selectedFormKec} onChange={(e) => setSelectedFormKec(e.target.value)} className="w-full p-2 border rounded-lg text-sm focus:ring-blue-500">{Object.keys(dataWilayah).map(kec => <option key={kec} value={kec}>{kec}</option>)}</select></div><div><label className="block text-xs font-bold text-gray-600 mb-1">Desa</label><select name="desa" required className="w-full p-2 border rounded-lg text-sm focus:ring-blue-500">{dataWilayah[selectedFormKec]?.map(desa => <option key={desa} value={desa}>{desa}</option>)}<option value="Semua Desa">Semua Desa</option></select></div></div><div><label className="block text-xs font-bold text-gray-600 mb-1">Aktivitas</label><textarea name="tentang" required rows="3" className="w-full p-2 border rounded-lg text-sm focus:ring-blue-500"></textarea></div><div className="flex gap-2 mt-4 pt-2"><button type="button" onClick={() => setShowCatatanModal(false)} className="flex-1 py-2 bg-gray-100 rounded-lg font-bold text-sm hover:bg-gray-200">Batal</button><button type="submit" className="flex-1 py-2 bg-blue-600 text-white rounded-lg font-bold text-sm hover:bg-blue-700">Simpan</button></div></form></div></div>
-        )}
-      </div>
-    );
-  };
-
-  const renderDatabaseSDM = () => {
-    const displaySDM = getFilteredSDM();
-    return (
-      <div className="space-y-4 animate-in fade-in">
-        <div className="bg-gradient-to-r from-gray-700 to-gray-900 rounded-xl p-6 text-white shadow-lg relative overflow-hidden">
-          <div className="absolute top-2 right-2 bg-green-500 text-white text-[10px] font-bold px-2 py-1 rounded flex items-center"><RefreshCw className="w-3 h-3 mr-1"/> Auto-Sync</div>
-          <h2 className="text-xl font-bold flex items-center mt-2"><Shield className="w-6 h-6 mr-2 text-blue-400"/> Database SDM PKH</h2>
-          <p className="text-gray-300 text-sm mt-1">Daftar Profil dan Wilayah Tugas Pendamping.</p>
-        </div>
-        <div className="relative"><Search className="absolute left-3 top-3 w-5 h-5 text-gray-400" /><input type="text" placeholder="Cari Nama Pendamping..." className="w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-gray-800" /></div>
-        <div className="space-y-3">
-          {displaySDM.map(sdm => (
-            <div key={sdm.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col hover:border-gray-300 transition-colors">
-              <div className="flex justify-between items-start mb-2"><div className="flex items-center"><div className="w-10 h-10 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center font-bold mr-3">{sdm.nama.charAt(0)}</div><div><h3 className="font-bold text-gray-800 leading-tight">{sdm.nama}</h3><p className="text-[10px] text-gray-500 font-mono">NIK: {sdm.nik}</p></div></div><span className={`text-[10px] font-bold px-2 py-1 rounded-full ${sdm.status === 'Aktif' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{sdm.status}</span></div>
-              <div className="grid grid-cols-2 gap-2 mt-2 pt-3 border-t border-gray-50 text-xs"><div className="bg-gray-50 p-2 rounded"><p className="text-gray-500">Wilayah Tugas</p><p className="font-bold text-gray-800">{sdm.kecamatan}</p></div><div className="bg-gray-50 p-2 rounded"><p className="text-gray-500">Total KPM</p><p className="font-bold text-blue-600">{sdm.jmlKpm} KPM</p></div></div>
-            </div>
-          ))}
+          <div onClick={() => goToMenu('tugas', 'progres')} className="bg-white border-l-4 border-indigo-500 p-4 rounded-xl cursor-pointer flex items-center justify-between shadow-sm"><div className="flex items-center"><div className="bg-indigo-100 p-2 rounded-lg mr-3"><ClipboardCheck className="w-6 h-6 text-indigo-600" /></div><div><p className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider mb-0.5">Tugas Direktif Aktif</p><p className="text-sm font-bold text-gray-800">{tasksData.length} Berjalan</p></div></div><ChevronRight className="w-5 h-5 text-gray-400" /></div>
+          <div onClick={() => goToMenu('tugas', 'vote')} className="bg-white border-l-4 border-purple-500 p-4 rounded-xl cursor-pointer flex items-center justify-between shadow-sm mb-4"><div className="flex items-center"><div className="bg-purple-100 p-2 rounded-lg mr-3"><BarChart2 className="w-6 h-6 text-purple-600" /></div><div><p className="text-[10px] font-bold text-purple-600 uppercase tracking-wider mb-0.5">Voting / Polling Aktif</p><p className="text-sm font-bold text-gray-800">{votesData.length} Polling</p></div></div><ChevronRight className="w-5 h-5 text-gray-400" /></div>
         </div>
       </div>
     );
@@ -329,7 +338,7 @@ export default function App() {
             <div className="space-y-4">
               <div className="space-y-3">
                 <div className="flex items-start"><CreditCard className="w-5 h-5 text-gray-400 mr-3 mt-0.5" /><div><p className="text-xs font-bold text-gray-500 uppercase">Nomor KKS</p><p className="text-sm font-bold text-blue-600 font-mono tracking-wider">{selectedKPM?.noKKS || '-'}</p></div></div>
-                <div className="flex items-start"><MapPin className="w-5 h-5 text-gray-400 mr-3 mt-0.5" /><div><p className="text-xs font-bold text-gray-500 uppercase">Alamat Lengkap</p><p className="text-sm font-medium text-gray-800">Desa {selectedKPM?.desa}, {selectedKPM?.kecamatan}</p></div></div>
+                <div className="flex items-start"><MapPin className="w-5 h-5 text-gray-400 mr-3 mt-0.5" /><div><p className="text-xs font-bold text-gray-500 uppercase">Alamat Lengkap</p><p className="text-sm font-medium text-gray-800">Desa {selectedKPM?.desa}, {selectedKPM?.kecamatan || currentUserData.kecamatan}</p></div></div>
                 <div className="flex items-start"><Briefcase className="w-5 h-5 text-orange-500 mr-3 mt-0.5" /><div><p className="text-xs font-bold text-gray-500 uppercase">Usaha / Potensi</p><p className="text-sm font-medium text-gray-800">{selectedKPM?.usaha || selectedKPM?.potensi || '-'}</p></div></div>
               </div>
               <div className="mt-4 pt-4 border-t border-gray-100">
@@ -354,14 +363,18 @@ export default function App() {
 
   const renderKPM = () => {
     const handleSimpanPotensial = (e) => {
-      e.preventDefault(); const kpmRef = kpmData.find(k => k.id === parseInt(e.target.kpmId.value));
-      setKpmPotensialData([{id: Date.now(), kpmId: kpmRef.id, nama: kpmRef.nama, desa: kpmRef.desa, potensi: e.target.potensi.value, pendampingId: currentUser.nama, kecamatan: currentUser.kec}, ...kpmPotensialData]);
-      setShowPotensialModal(false); showToast("Data KPM Potensial ditambahkan.");
+      e.preventDefault(); 
+      const kpmRef = kpmData.find(k => k.id === parseInt(e.target.kpmId.value));
+      setKpmPotensialData([{id: Date.now(), kpmId: kpmRef.id, nama: kpmRef.nama, desa: kpmRef.desa, potensi: e.target.potensi.value, pendampingId: currentUserData.nama, kecamatan: currentUserData.kecamatan}, ...kpmPotensialData]);
+      setShowPotensialModal(false); 
+      showToast("Data KPM Potensial ditambahkan.");
     };
     const handleSimpanGraduasi = (e) => {
-      e.preventDefault(); const kpmRef = kpmData.find(k => k.id === parseInt(e.target.kpmId.value));
-      setKpmGraduasiData([{id: Date.now(), kpmId: kpmRef.id, nama: kpmRef.nama, nik: kpmRef.nik, desa: kpmRef.desa, status: e.target.status.value, keterangan: e.target.ket.value, pendampingId: currentUser.nama, kecamatan: currentUser.kec}, ...kpmGraduasiData]);
-      setShowGraduasiModal(false); showToast("Data Graduasi tersinkronisasi.");
+      e.preventDefault(); 
+      const kpmRef = kpmData.find(k => k.id === parseInt(e.target.kpmId.value));
+      setKpmGraduasiData([{id: Date.now(), kpmId: kpmRef.id, nama: kpmRef.nama, nik: kpmRef.nik, desa: kpmRef.desa, status: e.target.status.value, keterangan: e.target.ket.value, pendampingId: currentUserData.nama, kecamatan: currentUserData.kecamatan}, ...kpmGraduasiData]);
+      setShowGraduasiModal(false); 
+      showToast("Data Graduasi tersinkronisasi.");
     };
 
     return (
@@ -382,7 +395,7 @@ export default function App() {
               </div>
             ))}
             {showPotensialModal && (
-              <div className="fixed inset-0 z-[70] flex items-center justify-center p-4"><div className="absolute inset-0 bg-black/60" onClick={() => setShowPotensialModal(false)}></div><div className="bg-white rounded-xl shadow-2xl w-full max-w-sm relative z-10 p-6"><h3 className="font-bold text-lg text-gray-800 mb-4">Tambah KPM Potensial</h3><form onSubmit={handleSimpanPotensial} className="space-y-3"><div><label className="block text-xs font-bold text-gray-600 mb-1">Pilih KPM</label><select name="kpmId" required className="w-full p-2 border rounded-lg text-sm bg-white">{getFilteredKPM(kpmData).map(k => <option key={k.id} value={k.id}>{k.nama}</option>)}</select></div><div><label className="block text-xs font-bold text-gray-600 mb-1">Potensi Usaha</label><input name="potensi" required type="text" className="w-full p-2 border rounded-lg text-sm"/></div><div className="flex gap-2 mt-4 pt-2"><button type="button" onClick={() => setShowPotensialModal(false)} className="flex-1 py-2 bg-gray-100 rounded-lg font-bold text-sm">Batal</button><button type="submit" className="flex-1 py-2 bg-teal-600 text-white rounded-lg font-bold text-sm">Simpan</button></div></form></div></div>
+              <div className="fixed inset-0 z-[70] flex items-center justify-center p-4"><div className="absolute inset-0 bg-black/60" onClick={() => setShowPotensialModal(false)}></div><div className="bg-white rounded-xl shadow-2xl w-full max-w-sm relative z-10 p-6"><h3 className="font-bold text-lg text-gray-800 mb-4">Tambah KPM Potensial</h3><form onSubmit={handleSimpanPotensial} className="space-y-3"><div><label className="block text-xs font-bold text-gray-600 mb-1">Pilih KPM</label><select name="kpmId" required className="w-full p-2 border border-gray-300 rounded-lg text-sm bg-white">{getFilteredKPM(kpmData).map(k => <option key={k.id} value={k.id}>{k.nama}</option>)}</select></div><div><label className="block text-xs font-bold text-gray-600 mb-1">Potensi Usaha</label><input name="potensi" required type="text" className="w-full p-2 border border-gray-300 rounded-lg text-sm"/></div><div className="flex gap-2 mt-4 pt-2"><button type="button" onClick={() => setShowPotensialModal(false)} className="flex-1 py-2 bg-gray-100 rounded-lg font-bold text-sm">Batal</button><button type="submit" className="flex-1 py-2 bg-teal-600 text-white rounded-lg font-bold text-sm">Simpan</button></div></form></div></div>
             )}
           </div>
         )}
@@ -397,14 +410,14 @@ export default function App() {
               </div>
             ))}
             {showGraduasiModal && (
-              <div className="fixed inset-0 z-[70] flex items-center justify-center p-4"><div className="absolute inset-0 bg-black/60" onClick={() => setShowGraduasiModal(false)}></div><div className="bg-white rounded-xl shadow-2xl w-full max-w-sm relative z-10 p-6"><h3 className="font-bold text-lg text-gray-800 mb-4">Tambah Data Graduasi</h3><form onSubmit={handleSimpanGraduasi} className="space-y-3"><div><label className="block text-xs font-bold text-gray-600 mb-1">Pilih KPM</label><select name="kpmId" required className="w-full p-2 border rounded-lg text-sm bg-white">{getFilteredKPM(kpmData).map(k => <option key={k.id} value={k.id}>{k.nama}</option>)}</select></div><div><label className="block text-xs font-bold text-gray-600 mb-1">Status</label><select name="status" required className="w-full p-2 border rounded-lg text-sm"><option>Progres</option><option>Sudah Graduasi</option></select></div><div><label className="block text-xs font-bold text-gray-600 mb-1">Keterangan / Alasan</label><input name="ket" required type="text" className="w-full p-2 border rounded-lg text-sm"/></div><div className="flex gap-2 mt-4 pt-2"><button type="button" onClick={() => setShowGraduasiModal(false)} className="flex-1 py-2 bg-gray-100 rounded-lg font-bold text-sm">Batal</button><button type="submit" className="flex-1 py-2 bg-orange-500 text-white rounded-lg font-bold text-sm">Simpan</button></div></form></div></div>
+              <div className="fixed inset-0 z-[70] flex items-center justify-center p-4"><div className="absolute inset-0 bg-black/60" onClick={() => setShowGraduasiModal(false)}></div><div className="bg-white rounded-xl shadow-2xl w-full max-w-sm relative z-10 p-6"><h3 className="font-bold text-lg text-gray-800 mb-4">Tambah Data Graduasi</h3><form onSubmit={handleSimpanGraduasi} className="space-y-3"><div><label className="block text-xs font-bold text-gray-600 mb-1">Pilih KPM</label><select name="kpmId" required className="w-full p-2 border border-gray-300 rounded-lg text-sm bg-white">{getFilteredKPM(kpmData).map(k => <option key={k.id} value={k.id}>{k.nama}</option>)}</select></div><div><label className="block text-xs font-bold text-gray-600 mb-1">Status Graduasi</label><select name="status" required className="w-full p-2 border border-gray-300 rounded-lg text-sm"><option>Rencana Graduasi</option><option>Progres</option><option>Sudah Graduasi</option></select></div><div><label className="block text-xs font-bold text-gray-600 mb-1">Keterangan / Alasan</label><input name="ket" required type="text" className="w-full p-2 border border-gray-300 rounded-lg text-sm"/></div><div className="flex gap-2 mt-4 pt-2"><button type="button" onClick={() => setShowGraduasiModal(false)} className="flex-1 py-2 bg-gray-100 rounded-lg font-bold text-sm">Batal</button><button type="submit" className="flex-1 py-2 bg-orange-500 text-white rounded-lg font-bold text-sm">Simpan</button></div></form></div></div>
             )}
           </div>
         )}
 
         {kpmMainTab === 'daftar' && (
           <div className="space-y-3">
-            <div className="flex space-x-2"><div className="relative flex-1"><Search className="absolute left-3 top-3 w-5 h-5 text-gray-400" /><input type="text" placeholder="Cari Nama / NIK..." className="w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500" /></div></div>
+            <div className="flex space-x-2"><div className="relative flex-1"><Search className="absolute left-3 top-3 w-5 h-5 text-gray-400" /><input type="text" placeholder="Cari Nama / NIK..." className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" /></div></div>
             {getFilteredKPM(kpmData).map(kpm => (
               <div key={kpm.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex justify-between items-center hover:border-blue-300 transition-colors">
                 <div><h3 className="font-bold text-gray-800">{kpm.nama}</h3><p className="text-sm text-gray-500">{kpm.nik}</p></div>
@@ -431,12 +444,25 @@ export default function App() {
 
     const simpanAgenda = (e) => {
       e.preventDefault();
-      const newData = { id: Date.now(), title: e.target.title.value, date: e.target.date.value, time: e.target.time ? e.target.time.value : '', loc: e.target.loc ? e.target.loc.value : '', pic: currentUser.nama, kecamatan: currentUser.kec, supervisi: false, batasWaktu: e.target.date.value };
+      const newData = { 
+        id: Date.now(), 
+        title: e.target.title.value, 
+        date: e.target.date.value, 
+        time: e.target.time ? e.target.time.value : '', 
+        loc: e.target.loc ? e.target.loc.value : '', 
+        pic: currentUserData.nama, 
+        kecamatan: currentUserData.kecamatan, 
+        supervisi: false,
+        batasWaktu: e.target.date.value 
+      };
+      
       if(agendaTypeToEdit === 'harian') setAgendaHarian([newData, ...agendaHarian]);
       else if(agendaTypeToEdit === 'ketuatim') setAgendaKetuaTim([newData, ...agendaKetuaTim]);
       else if(agendaTypeToEdit === 'khusus') setAgendaKhususData([newData, ...agendaKhususData]);
       else if(agendaTypeToEdit === 'deadline') setDeadlineData([newData, ...deadlineData]);
-      setShowAgendaModal(false); showToast("Berhasil disimpan!");
+      
+      setShowAgendaModal(false); 
+      showToast("Berhasil disimpan!");
     };
     
     const hapusAgenda = (id, type) => {
@@ -462,9 +488,16 @@ export default function App() {
             {getFilteredAgenda(agendaHarian).map((agenda) => (
               <div key={agenda.id} className="bg-white p-4 rounded-xl shadow-sm border-l-4 border-blue-500 relative">
                 <h4 className="font-bold text-gray-800 pr-24">{agenda.title}</h4>
-                <div className="mt-2 space-y-1"><p className="text-sm text-gray-600 flex items-center"><CalendarDays className="w-4 h-4 mr-2" /> {agenda.date}, {agenda.time} WIB</p><p className="text-sm text-gray-600 flex items-center"><MapPin className="w-4 h-4 mr-2" /> {agenda.loc} ({agenda.kecamatan})</p></div>
+                <div className="mt-2 space-y-1">
+                  <p className="text-sm text-gray-600 flex items-center"><CalendarDays className="w-4 h-4 mr-2" /> {agenda.date}, {agenda.time} WIB</p>
+                  <p className="text-sm text-gray-600 flex items-center"><MapPin className="w-4 h-4 mr-2" /> {agenda.loc} ({agenda.kecamatan})</p>
+                </div>
                 {isKorkab && (
-                  <div className="absolute top-4 right-4"><button onClick={() => { setAgendaHarian(prev => prev.map(a => a.id === agenda.id ? {...a, supervisi: !a.supervisi} : a)); showToast("Status supervisi diubah!"); }} className={`text-[10px] px-2 py-1 rounded font-bold border flex items-center ${agenda.supervisi ? 'bg-green-100 text-green-700 border-green-300' : 'bg-gray-100 text-gray-600 border-gray-300'}`}><CheckCircle className="w-3 h-3 mr-1" />{agenda.supervisi ? 'Disupervisi' : 'Beri Supervisi'}</button></div>
+                  <div className="absolute top-4 right-4">
+                    <button onClick={() => { setAgendaHarian(prev => prev.map(a => a.id === agenda.id ? {...a, supervisi: !a.supervisi} : a)); showToast("Status supervisi diubah!"); }} className={`text-[10px] px-2 py-1 rounded font-bold border flex items-center ${agenda.supervisi ? 'bg-green-100 text-green-700 border-green-300' : 'bg-gray-100 text-gray-600 border-gray-300'}`}>
+                      <CheckCircle className="w-3 h-3 mr-1" />{agenda.supervisi ? 'Disupervisi' : 'Beri Supervisi'}
+                    </button>
+                  </div>
                 )}
               </div>
             ))}
@@ -476,7 +509,8 @@ export default function App() {
             {isKorkab && (<button onClick={() => { setAgendaTypeToEdit('ketuatim'); setShowAgendaModal(true); }} className="w-full py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-colors"><Plus className="inline w-5 h-5 mr-1" /> Tambah Agenda Supervisi</button>)}
             {agendaKetuaTim.map(agenda => (
               <div key={agenda.id} className="bg-indigo-50 border border-indigo-200 p-4 rounded-xl relative">
-                <h4 className="font-bold text-indigo-800 pr-10">{agenda.title}</h4><p className="text-sm text-indigo-700 mt-2">{agenda.date}, {agenda.time} WIB</p>
+                <h4 className="font-bold text-indigo-800 pr-10">{agenda.title}</h4>
+                <p className="text-sm text-indigo-700 mt-2">{agenda.date}, {agenda.time} WIB</p>
                 {isKorkab && <button onClick={() => hapusAgenda(agenda.id, 'ketuatim')} className="absolute top-4 right-4 text-red-500 bg-red-100 p-1.5 rounded"><Trash2 className="w-4 h-4"/></button>}
               </div>
             ))}
@@ -488,7 +522,8 @@ export default function App() {
              {isKorkab && (<button onClick={() => { setAgendaTypeToEdit('khusus'); setShowAgendaModal(true); }} className="w-full py-3 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 transition-colors"><Plus className="w-5 h-5 mr-1 inline" /> Tambah Kegiatan Khusus</button>)}
             {agendaKhususData.map(khusus => (
               <div key={khusus.id} className="bg-red-50 border border-red-200 p-4 rounded-xl relative">
-                <h4 className="font-bold text-red-800 pr-10">{khusus.title}</h4><p className="text-sm text-red-700 mt-2">{khusus.date}</p>
+                <h4 className="font-bold text-red-800 pr-10">{khusus.title}</h4>
+                <p className="text-sm text-red-700 mt-2">{khusus.date}</p>
                 {isKorkab && <button onClick={() => hapusAgenda(khusus.id, 'khusus')} className="absolute top-4 right-4 text-red-600 bg-red-200 p-1.5 rounded"><Trash2 className="w-4 h-4"/></button>}
               </div>
             ))}
@@ -501,7 +536,8 @@ export default function App() {
             {deadlineData.map(d => (
               <div key={d.id} className="bg-white border-2 border-indigo-200 p-4 rounded-xl shadow-sm relative overflow-hidden">
                 <div className="absolute top-0 right-0 bg-indigo-500 text-white text-[10px] font-bold px-3 py-1 rounded-bl-lg flex items-center">TUGAS AKTIF</div>
-                <h4 className="font-bold text-gray-800 mt-2 pr-20">{d.title}</h4><p className="text-xs text-indigo-800 font-bold mt-2">Batas Waktu: {d.batasWaktu}</p>
+                <h4 className="font-bold text-gray-800 mt-2 pr-20">{d.title}</h4>
+                <p className="text-xs text-indigo-800 font-bold mt-2">Batas Waktu: {d.batasWaktu}</p>
                 {isKorkab && <button onClick={() => hapusAgenda(d.id, 'deadline')} className="mt-3 w-full py-2 bg-red-50 text-red-600 text-xs font-bold rounded border border-red-200">Hapus Deadline</button>}
               </div>
             ))}
@@ -519,9 +555,32 @@ export default function App() {
             <div className="bg-white border-2 border-green-500 p-4 rounded-xl shadow-md">
               <h3 className="font-bold text-gray-800 mb-3"><Clock className="w-5 h-5 mr-2 text-green-600 inline" /> Absen Piket Hari Ini</h3>
               <p className="text-xs text-gray-500 mb-3 bg-gray-50 p-2 rounded text-center">Aturan Jam Piket: {aturanPiket.jamMulai} - {aturanPiket.jamSelesai} WIB</p>
-              {absenStatus === 'belum' && (<button onClick={() => { setAbsenStatus('datang'); setJamDatang(getCurrentTime() + ' WIB'); showToast("Berhasil Absen Datang Piket!"); }} className="w-full py-4 bg-green-600 text-white rounded-lg font-bold shadow-md hover:bg-green-700 transition-colors"><LogIn className="inline w-6 h-6 mr-2" /> KLIK DATANG PIKET</button>)}
-              {absenStatus === 'datang' && (<div className="space-y-4"><div className="bg-green-50 text-green-800 p-3 rounded-lg text-center font-bold">Terekam Datang: {jamDatang}</div><div className="grid grid-cols-2 gap-2"><button onClick={() => { setAbsenStatus('pulang'); setDenda(false); showToast("Selesai Piket!"); }} className="py-3 bg-red-600 text-white rounded-lg font-bold text-sm shadow hover:bg-red-700">Pulang Normal</button><button onClick={() => { setAbsenStatus('pulang'); setDenda(true); showToast("Kena Denda!"); }} className="py-3 bg-orange-500 text-white rounded-lg font-bold text-sm px-1 shadow hover:bg-orange-600">Simulasi Denda</button></div></div>)}
-              {absenStatus === 'pulang' && (<div className={`p-4 rounded-lg text-center space-y-2 border bg-gray-50 border-gray-200`}><h4 className={`font-bold text-gray-800`}>Piket Selesai</h4><p className="text-sm text-gray-600">Datang: {jamDatang} | Pulang: 10:00 WIB</p>{denda && (<div className="mt-2 bg-red-100 text-red-700 text-xs p-3 rounded text-left border border-red-300"><div className="flex items-center font-bold mb-1"><Banknote className="w-4 h-4 mr-1"/> Denda Keterlambatan</div><span className="text-lg font-black mt-1 block">Rp {aturanPiket.denda.toLocaleString('id-ID')}</span></div>)}</div>)}
+              {absenStatus === 'belum' && (
+                <button onClick={() => { setAbsenStatus('datang'); setJamDatang(getCurrentTime() + ' WIB'); showToast("Berhasil Absen Datang Piket!"); }} className="w-full py-4 bg-green-600 text-white rounded-lg font-bold shadow-md hover:bg-green-700 transition-colors">
+                  <LogIn className="inline w-6 h-6 mr-2" /> KLIK DATANG PIKET
+                </button>
+              )}
+              {absenStatus === 'datang' && (
+                <div className="space-y-4">
+                  <div className="bg-green-50 text-green-800 p-3 rounded-lg text-center font-bold">Terekam Datang: {jamDatang}</div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button onClick={() => { setAbsenStatus('pulang'); setDenda(false); showToast("Selesai Piket!"); }} className="py-3 bg-red-600 text-white rounded-lg font-bold text-sm shadow hover:bg-red-700 transition-colors">Pulang Normal</button>
+                    <button onClick={() => { setAbsenStatus('pulang'); setDenda(true); showToast("Kena Denda!"); }} className="py-3 bg-orange-500 text-white rounded-lg font-bold text-sm px-1 shadow hover:bg-orange-600 transition-colors">Simulasi Denda</button>
+                  </div>
+                </div>
+              )}
+              {absenStatus === 'pulang' && (
+                <div className={`p-4 rounded-lg text-center space-y-2 border bg-gray-50 border-gray-200`}>
+                  <h4 className={`font-bold text-gray-800`}>Piket Selesai</h4>
+                  <p className="text-sm text-gray-600">Datang: {jamDatang} | Pulang: 10:00 WIB</p>
+                  {denda && (
+                    <div className="mt-2 bg-red-100 text-red-700 text-xs p-3 rounded text-left border border-red-300">
+                      <div className="flex items-center font-bold mb-1"><Banknote className="w-4 h-4 mr-1"/> Denda Keterlambatan</div>
+                      <span className="text-lg font-black mt-1 block">Rp {aturanPiket.denda.toLocaleString('id-ID')}</span>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
@@ -533,10 +592,10 @@ export default function App() {
               {showTukarModal && (
                 <div className="mb-4 bg-purple-50 p-3 rounded-lg border border-purple-200">
                   <h5 className="font-bold text-purple-800 text-sm mb-2">Pengajuan Tukar (Approve Katim)</h5>
-                  <form onSubmit={(e) => { e.preventDefault(); setPengajuanTukar([{ id: Date.now(), pengaju: currentUser.nama, tglAwal: e.target.tglAwal.value, tglTujuan: e.target.tglTujuan.value, status: 'pending' }, ...pengajuanTukar]); setShowTukarModal(false); showToast("Pengajuan tukar diajukan!"); }}>
-                    <input name="tglAwal" required type="text" placeholder="Jadwal Anda (Contoh: 10 Apr)" className="w-full p-2 text-sm border rounded mb-2"/>
-                    <input name="tglTujuan" required type="text" placeholder="Tukar ke Tanggal Berapa?" className="w-full p-2 text-sm border rounded mb-2"/>
-                    <button type="submit" className="w-full bg-purple-600 text-white py-2 rounded text-sm font-bold shadow hover:bg-purple-700">Ajukan Pertukaran</button>
+                  <form onSubmit={(e) => { e.preventDefault(); setPengajuanTukar([{ id: Date.now(), pengaju: currentUserData.nama, tglAwal: e.target.tglAwal.value, tglTujuan: e.target.tglTujuan.value, status: 'pending' }, ...pengajuanTukar]); setShowTukarModal(false); showToast("Pengajuan tukar diajukan!"); }}>
+                    <input name="tglAwal" required type="text" placeholder="Jadwal Anda (Contoh: 10 Apr)" className="w-full p-2 text-sm border border-purple-300 rounded mb-2"/>
+                    <input name="tglTujuan" required type="text" placeholder="Tukar ke Tanggal Berapa?" className="w-full p-2 text-sm border border-purple-300 rounded mb-2"/>
+                    <button type="submit" className="w-full bg-purple-600 text-white py-2 rounded text-sm font-bold shadow hover:bg-purple-700 transition-colors">Ajukan Pertukaran</button>
                   </form>
                 </div>
               )}
@@ -555,7 +614,10 @@ export default function App() {
 
               <div className="space-y-2">
                 {piketBulanIni.map((piket, idx) => (
-                  <div key={idx} className={`flex justify-between items-center p-3 rounded-lg border ${piket.status === 'today' ? 'border-green-500 bg-green-50' : 'border-gray-100 bg-gray-50'}`}><span className="text-sm font-medium">{piket.tgl}</span><span className="text-sm font-bold">{piket.nama}</span></div>
+                  <div key={idx} className={`flex justify-between items-center p-3 rounded-lg border ${piket.status === 'today' ? 'border-green-500 bg-green-50' : 'border-gray-100 bg-gray-50'}`}>
+                    <span className="text-sm font-medium">{piket.tgl}</span>
+                    <span className="text-sm font-bold">{piket.nama}</span>
+                  </div>
                 ))}
               </div>
             </div>
@@ -569,10 +631,32 @@ export default function App() {
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm relative z-10 p-6">
               <h3 className="font-bold text-lg text-gray-800 mb-4">Form {agendaTypeToEdit === 'deadline' ? 'Deadline' : 'Agenda'} Baru</h3>
               <form onSubmit={simpanAgenda} className="space-y-3">
-                <div><label className="block text-xs font-bold text-gray-600 mb-1">Judul {agendaTypeToEdit === 'deadline' ? 'Tugas' : 'Kegiatan'}</label><input name="title" required type="text" className="w-full p-2 border border-gray-300 rounded-lg text-sm"/></div>
-                <div className="grid grid-cols-2 gap-2"><div><label className="block text-xs font-bold text-gray-600 mb-1">{agendaTypeToEdit === 'deadline' ? 'Batas Waktu' : 'Tanggal'}</label><input name="date" required type="text" defaultValue={agendaTypeToEdit === 'deadline' ? '3 Hari : 00 Jam' : getCurrentDate()} className="w-full p-2 border border-gray-300 rounded-lg text-sm"/></div>{agendaTypeToEdit !== 'deadline' && (<div><label className="block text-xs font-bold text-gray-600 mb-1">Jam</label><input name="time" required type="time" defaultValue={getCurrentTime()} className="w-full p-2 border border-gray-300 rounded-lg text-sm"/></div>)}</div>
-                {agendaTypeToEdit !== 'deadline' && (<div><label className="block text-xs font-bold text-gray-600 mb-1">Lokasi Detail</label><input name="loc" required type="text" className="w-full p-2 border border-gray-300 rounded-lg text-sm"/></div>)}
-                <div className="flex gap-2 mt-4 pt-2"><button type="button" onClick={() => setShowAgendaModal(false)} className="flex-1 py-2 bg-gray-100 rounded-lg font-bold text-sm">Batal</button><button type="submit" className="flex-1 py-2 bg-blue-600 text-white rounded-lg font-bold text-sm">Simpan</button></div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-600 mb-1">Judul {agendaTypeToEdit === 'deadline' ? 'Tugas' : 'Kegiatan'}</label>
+                  <input name="title" required type="text" className="w-full p-2 border border-gray-300 rounded-lg text-sm"/>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs font-bold text-gray-600 mb-1">{agendaTypeToEdit === 'deadline' ? 'Batas Waktu' : 'Tanggal'}</label>
+                    <input name="date" required type="text" defaultValue={agendaTypeToEdit === 'deadline' ? '3 Hari : 00 Jam' : getCurrentDate()} className="w-full p-2 border border-gray-300 rounded-lg text-sm"/>
+                  </div>
+                  {agendaTypeToEdit !== 'deadline' && (
+                    <div>
+                      <label className="block text-xs font-bold text-gray-600 mb-1">Jam</label>
+                      <input name="time" required type="time" defaultValue={getCurrentTime()} className="w-full p-2 border border-gray-300 rounded-lg text-sm"/>
+                    </div>
+                  )}
+                </div>
+                {agendaTypeToEdit !== 'deadline' && (
+                  <div>
+                    <label className="block text-xs font-bold text-gray-600 mb-1">Lokasi Detail</label>
+                    <input name="loc" required type="text" className="w-full p-2 border border-gray-300 rounded-lg text-sm"/>
+                  </div>
+                )}
+                <div className="flex gap-2 mt-4 pt-2">
+                  <button type="button" onClick={() => setShowAgendaModal(false)} className="flex-1 py-2 bg-gray-100 rounded-lg font-bold text-sm">Batal</button>
+                  <button type="submit" className="flex-1 py-2 bg-blue-600 text-white rounded-lg font-bold text-sm">Simpan</button>
+                </div>
               </form>
             </div>
           </div>
@@ -583,7 +667,13 @@ export default function App() {
             <div className="absolute inset-0 bg-black/60" onClick={() => generatorStep === 4 && setShowGeneratorModal(false)}></div>
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm relative z-10 p-6">
               <h3 className="font-bold text-lg text-gray-800 mb-4 flex items-center"><Settings className="w-5 h-5 mr-2 text-blue-600" /> Auto-Generate Jadwal</h3>
-              {generatorStep < 4 ? (<div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden"><div className="h-full bg-blue-600 transition-all duration-1000 ease-out" style={{ width: `${(generatorStep / 4) * 100}%` }}></div></div>) : (<button onClick={() => { setShowGeneratorModal(false); showToast("Jadwal piket berhasil diterapkan!"); }} className="w-full py-3 bg-blue-600 text-white rounded-lg font-bold mt-4 shadow hover:bg-blue-700">Selesai & Terapkan</button>)}
+              {generatorStep < 4 ? (
+                <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
+                  <div className="h-full bg-blue-600 transition-all duration-1000 ease-out" style={{ width: `${(generatorStep / 4) * 100}%` }}></div>
+                </div>
+              ) : (
+                <button onClick={() => { setShowGeneratorModal(false); showToast("Jadwal piket berhasil diterapkan!"); }} className="w-full py-3 bg-blue-600 text-white rounded-lg font-bold mt-4 shadow hover:bg-blue-700">Selesai & Terapkan</button>
+              )}
             </div>
           </div>
         )}
@@ -631,11 +721,11 @@ export default function App() {
           <>
             {selectedTaskView ? (
               <div className="space-y-4 animate-in fade-in slide-in-from-right-2">
-                <button onClick={() => setSelectedTaskView(null)} className="flex items-center text-blue-600 font-medium bg-blue-50 px-3 py-1 rounded-lg hover:bg-blue-100"><ChevronLeft className="w-5 h-5 mr-1" /> Kembali ke Daftar</button>
+                <button onClick={() => setSelectedTaskView(null)} className="flex items-center text-blue-600 font-medium bg-blue-50 px-3 py-1 rounded-lg hover:bg-blue-100 transition-colors"><ChevronLeft className="w-5 h-5 mr-1" /> Kembali ke Daftar</button>
                 <div className={`bg-white border-t-4 border-t-${selectedTaskView.color}-500 p-5 rounded-xl shadow-sm border-x border-b border-gray-100`}>
                   <div className="flex justify-between items-start mb-3"><h3 className="font-bold text-gray-800 text-lg leading-tight">{selectedTaskView.title}</h3></div>
                   <div className={`bg-${selectedTaskView.color}-50 p-3 rounded-lg mb-4 text-sm text-gray-700 border border-${selectedTaskView.color}-100`}><p>{selectedTaskView.desc}</p></div>
-                  <button onClick={() => { setSelectedTugasToLapor(selectedTaskView); setShowLaporTugasModal(true); }} className={`w-full py-3 bg-${selectedTaskView.color}-600 text-white rounded-lg text-sm font-bold flex items-center justify-center hover:bg-${selectedTaskView.color}-700 shadow-md mt-2`}><CheckSquare className="w-5 h-5 mr-2"/> Lapor Kegiatan Harian</button>
+                  <button onClick={() => { setSelectedTugasToLapor(selectedTaskView); setShowLaporTugasModal(true); }} className={`w-full py-3 bg-${selectedTaskView.color}-600 text-white rounded-lg text-sm font-bold flex items-center justify-center hover:bg-${selectedTaskView.color}-700 shadow-md mt-2 transition-colors`}><CheckSquare className="w-5 h-5 mr-2"/> Lapor Kegiatan Harian</button>
                 </div>
               </div>
             ) : (
@@ -660,7 +750,7 @@ export default function App() {
               const globalPct = currentProgress.target > 0 ? Math.min(100, Math.round((currentProgress.realisasi / currentProgress.target) * 100)) : 0;
               return (
                 <div className="space-y-4 animate-in fade-in slide-in-from-right-2">
-                  <button onClick={() => setSelectedTaskView(null)} className="flex items-center text-indigo-600 font-medium bg-indigo-50 px-3 py-1 rounded-lg hover:bg-indigo-100"><ChevronLeft className="w-5 h-5 mr-1" /> Kembali</button>
+                  <button onClick={() => setSelectedTaskView(null)} className="flex items-center text-indigo-600 font-medium bg-indigo-50 px-3 py-1 rounded-lg hover:bg-indigo-100 transition-colors"><ChevronLeft className="w-5 h-5 mr-1" /> Kembali</button>
                   <div className="bg-gradient-to-br from-indigo-600 to-indigo-800 p-5 rounded-xl shadow-md text-white">
                     <h4 className="font-bold text-lg mb-1 flex items-center"><Target className="w-5 h-5 mr-2 text-indigo-200"/> Auto-Rekap Progres</h4>
                     <div className="grid grid-cols-3 gap-2 mt-3">
@@ -676,7 +766,7 @@ export default function App() {
                        const userVal = currentProgress.userRealisasi[sdm.nama] || 0;
                        const targetPerUser = Math.round(currentProgress.target / sdmData.length);
                        const pct = targetPerUser > 0 ? Math.round((userVal/targetPerUser)*100) : 0;
-                       if (!isKorkab && !isKorcam && currentUser.nama !== sdm.nama) return null;
+                       if (!isKorkab && !isKorcam && currentUserData.nama !== sdm.nama) return null;
                        return (
                           <div key={sdm.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
                              <div className="flex justify-between items-start mb-2"><h4 className="font-bold text-gray-800 text-sm flex items-center"><UserSquare className="w-4 h-4 mr-1 text-gray-400"/> {sdm.nama}</h4><span className="text-[10px] font-bold text-gray-600 bg-gray-100 px-2 py-1 rounded-full">{sdm.kecamatan}</span></div>
@@ -780,16 +870,15 @@ export default function App() {
                 if(selectedTugasToLapor) {
                   setTugasProgress(prev => {
                     const old = prev[selectedTugasToLapor.id] || {target:1000, realisasi:0, userRealisasi:{}};
-                    const oldUser = old.userRealisasi[currentUser.nama] || 0;
-                    return {...prev, [selectedTugasToLapor.id]: {...old, realisasi: old.realisasi + val, userRealisasi: {...old.userRealisasi, [currentUser.nama]: oldUser + val}}};
+                    const oldUser = old.userRealisasi[currentUserData.nama] || 0;
+                    return {...prev, [selectedTugasToLapor.id]: {...old, realisasi: old.realisasi + val, userRealisasi: {...old.userRealisasi, [currentUserData.nama]: oldUser + val}}};
                   });
                 }
-                setShowLaporTugasModal(false);
-                showToast("Progres dilaporkan secara Real-Time!");
+                setShowLaporTugasModal(false); showToast("Progres dilaporkan secara Real-Time!");
               }} className="space-y-3">
-                <div className="bg-indigo-50 p-2 rounded border border-indigo-100 mb-2"><label className="block text-[10px] font-bold text-indigo-600 uppercase mb-1">Pelaksana (Auto)</label><p className="text-sm font-bold text-indigo-800">{currentUser.nama}</p></div>
+                <div className="bg-indigo-50 p-2 rounded border border-indigo-100 mb-2"><label className="block text-[10px] font-bold text-indigo-600 uppercase mb-1">Pelaksana (Auto)</label><p className="text-sm font-bold text-indigo-800">{currentUserData.nama}</p></div>
                 <div><label className="block text-xs font-bold text-gray-600 mb-1">Jumlah Hari Ini</label><input name="jumlah" required type="number" min="1" className="w-full p-2 border border-gray-300 rounded-lg text-sm font-bold"/></div>
-                <div className="flex gap-2 mt-4 pt-2"><button type="button" onClick={() => setShowLaporTugasModal(false)} className="flex-1 py-2 bg-gray-100 text-gray-600 rounded-lg font-bold text-sm">Batal</button><button type="submit" className="flex-1 py-2 bg-indigo-600 text-white rounded-lg font-bold text-sm flex items-center justify-center"><CheckCircle className="w-4 h-4 mr-1"/> Submit Real-Time</button></div>
+                <div className="flex gap-2 mt-4 pt-2"><button type="button" onClick={() => setShowLaporTugasModal(false)} className="flex-1 py-2 bg-gray-100 text-gray-600 rounded-lg font-bold text-sm hover:bg-gray-200">Batal</button><button type="submit" className="flex-1 py-2 bg-indigo-600 text-white rounded-lg font-bold text-sm flex items-center justify-center hover:bg-indigo-700"><CheckCircle className="w-4 h-4 mr-1"/> Submit Real-Time</button></div>
               </form>
             </div>
           </div>
@@ -806,14 +895,13 @@ export default function App() {
                 const newTask = { id: 't' + Date.now(), title: e.target.title.value, target: e.target.targetArea.value, desc: e.target.desc.value, linkId: '00' + Math.floor(Math.random() * 100), color: 'blue' };
                 setTasksData([newTask, ...tasksData]); 
                 setTugasProgress(prev => ({...prev, [newTask.id]: { target: targetTotal, realisasi: 0, userRealisasi: {} }}));
-                setShowTambahTugasModal(false); 
-                showToast("Tugas berhasil dipublikasi!"); 
+                setShowTambahTugasModal(false); showToast("Tugas berhasil dipublikasi!"); 
               }} className="space-y-3">
-                <div><label className="block text-xs font-bold text-gray-600 mb-1">Judul Tugas</label><input name="title" required type="text" className="w-full p-2 border rounded-lg text-sm"/></div>
-                <div><label className="block text-xs font-bold text-gray-600 mb-1">Target Area / Sasaran</label><select name="targetArea" className="w-full p-2 border rounded-lg text-sm"><option>Semua Pendamping</option><option>Per Kecamatan</option></select></div>
-                <div><label className="block text-xs font-bold text-gray-600 mb-1">Total Target Kuantitas</label><input name="jumlahTarget" required type="number" className="w-full p-2 border rounded-lg text-sm"/></div>
-                <div><label className="block text-xs font-bold text-gray-600 mb-1">Instruksi</label><textarea name="desc" rows="2" required className="w-full p-2 border rounded-lg text-sm"></textarea></div>
-                <div className="flex gap-2 mt-4 pt-2"><button type="button" onClick={() => setShowTambahTugasModal(false)} className="flex-1 py-2 bg-gray-100 rounded-lg font-bold text-sm">Batal</button><button type="submit" className="flex-1 py-2 bg-blue-600 text-white rounded-lg font-bold text-sm">Publikasi Tugas</button></div>
+                <div><label className="block text-xs font-bold text-gray-600 mb-1">Judul Tugas</label><input name="title" required type="text" className="w-full p-2 border border-gray-300 rounded-lg text-sm"/></div>
+                <div><label className="block text-xs font-bold text-gray-600 mb-1">Target Area / Sasaran</label><select name="targetArea" className="w-full p-2 border border-gray-300 rounded-lg text-sm"><option>Semua Pendamping</option><option>Per Kecamatan</option></select></div>
+                <div><label className="block text-xs font-bold text-gray-600 mb-1">Total Target Kuantitas</label><input name="jumlahTarget" required type="number" className="w-full p-2 border border-gray-300 rounded-lg text-sm"/></div>
+                <div><label className="block text-xs font-bold text-gray-600 mb-1">Instruksi</label><textarea name="desc" rows="2" required className="w-full p-2 border border-gray-300 rounded-lg text-sm"></textarea></div>
+                <div className="flex gap-2 mt-4 pt-2"><button type="button" onClick={() => setShowTambahTugasModal(false)} className="flex-1 py-2 bg-gray-100 rounded-lg font-bold text-sm hover:bg-gray-200">Batal</button><button type="submit" className="flex-1 py-2 bg-blue-600 text-white rounded-lg font-bold text-sm hover:bg-blue-700">Publikasi Tugas</button></div>
               </form>
             </div>
           </div>
@@ -828,12 +916,11 @@ export default function App() {
                 e.preventDefault(); 
                 const newVote = { id: 'v' + Date.now(), title: e.target.title.value, status: 'AKTIF', desc: e.target.desc.value, linkId: 'v' + Math.floor(Math.random() * 100), options: ['Opsi A', 'Opsi B', 'Opsi C'] };
                 setVotesData([newVote, ...votesData]); 
-                setShowTambahVoteModal(false); 
-                showToast("Voting dibuat!"); 
+                setShowTambahVoteModal(false); showToast("Voting dibuat!"); 
               }} className="space-y-3">
-                <div><label className="block text-xs font-bold text-gray-600 mb-1">Topik Polling</label><input name="title" required type="text" className="w-full p-2 border rounded-lg text-sm"/></div>
-                <div><label className="block text-xs font-bold text-gray-600 mb-1">Deskripsi / Instruksi</label><textarea name="desc" rows="2" required className="w-full p-2 border rounded-lg text-sm"></textarea></div>
-                <div className="flex gap-2 mt-4 pt-2"><button type="button" onClick={() => setShowTambahVoteModal(false)} className="flex-1 py-2 bg-gray-100 rounded-lg font-bold text-sm">Batal</button><button type="submit" className="flex-1 py-2 bg-purple-600 text-white rounded-lg font-bold text-sm">Buat Polling</button></div>
+                <div><label className="block text-xs font-bold text-gray-600 mb-1">Topik Polling</label><input name="title" required type="text" className="w-full p-2 border border-gray-300 rounded-lg text-sm"/></div>
+                <div><label className="block text-xs font-bold text-gray-600 mb-1">Deskripsi / Instruksi</label><textarea name="desc" rows="2" required className="w-full p-2 border border-gray-300 rounded-lg text-sm"></textarea></div>
+                <div className="flex gap-2 mt-4 pt-2"><button type="button" onClick={() => setShowTambahVoteModal(false)} className="flex-1 py-2 bg-gray-100 rounded-lg font-bold text-sm hover:bg-gray-200">Batal</button><button type="submit" className="flex-1 py-2 bg-purple-600 text-white rounded-lg font-bold text-sm hover:bg-purple-700">Buat Polling</button></div>
               </form>
             </div>
           </div>
@@ -845,16 +932,10 @@ export default function App() {
   const renderPengaduan = () => {
     const handleSimpanPengaduan = (e) => {
       e.preventDefault();
-      const newPengaduan = { id: Date.now(), nama: e.target.nama.value, nik: e.target.nik.value, tanggal: getCurrentDate(), jam: getCurrentTime(), isi: e.target.isi.value, tindakLanjut: '-', status: 'Diproses', petugas: currentUser.nama };
+      const newPengaduan = { id: Date.now(), nama: e.target.nama.value, nik: e.target.nik.value, tanggal: getCurrentDate(), jam: getCurrentTime(), isi: e.target.isi.value, tindakLanjut: '-', status: 'Diproses', petugas: currentUserData.nama };
       setPengaduanData([newPengaduan, ...pengaduanData]);
       setShowPengaduanModal(false); showToast("Pengaduan disubmit!");
     };
-    const handleTindakLanjut = (e) => {
-      e.preventDefault();
-      setPengaduanData(prev => prev.map(p => p.id === selectedPengaduan.id ? {...p, tindakLanjut: e.target.tl.value, status: e.target.status.value} : p));
-      setShowTindakLanjutModal(false); showToast("Tindak lanjut pengaduan berhasil disimpan.");
-    };
-
     return (
       <div className="space-y-4 animate-in fade-in">
         <button onClick={() => setShowPengaduanModal(true)} className="w-full py-3 bg-red-600 text-white rounded-xl font-bold shadow hover:bg-red-700 transition-colors"><Plus className="inline w-5 h-5 mr-1" /> Buat Pengaduan</button>
@@ -871,10 +952,10 @@ export default function App() {
 
         {/* Modals Pengaduan */}
         {showPengaduanModal && (
-          <div className="fixed inset-0 z-[70] flex items-center justify-center p-4"><div className="absolute inset-0 bg-black/60" onClick={() => setShowPengaduanModal(false)}></div><div className="bg-white rounded-xl shadow-2xl w-full max-w-sm relative z-10 p-6"><h3 className="font-bold text-lg text-gray-800 mb-4">Form Pengaduan KPM</h3><form onSubmit={handleSimpanPengaduan} className="space-y-3"><div className="bg-red-50 p-2 rounded border border-red-100 mb-2"><label className="block text-[10px] font-bold text-red-600 uppercase mb-1">Petugas Penerima</label><p className="text-sm font-bold text-red-800">{currentUser.nama}</p></div><div><label className="block text-xs font-bold text-gray-600 mb-1">Nama Pelapor (KPM)</label><input name="nama" required type="text" className="w-full p-2 border rounded-lg text-sm"/></div><div><label className="block text-xs font-bold text-gray-600 mb-1">NIK</label><input name="nik" required type="text" className="w-full p-2 border rounded-lg text-sm"/></div><div><label className="block text-xs font-bold text-gray-600 mb-1">Detail Pengaduan</label><textarea name="isi" required rows="3" className="w-full p-2 border rounded-lg text-sm"></textarea></div><div className="flex gap-2 mt-4 pt-2"><button type="button" onClick={() => setShowPengaduanModal(false)} className="flex-1 py-2 bg-gray-100 rounded-lg font-bold text-sm">Batal</button><button type="submit" className="flex-1 py-2 bg-red-600 text-white rounded-lg font-bold text-sm">Kirim</button></div></form></div></div>
+          <div className="fixed inset-0 z-[70] flex items-center justify-center p-4"><div className="absolute inset-0 bg-black/60" onClick={() => setShowPengaduanModal(false)}></div><div className="bg-white rounded-xl shadow-2xl w-full max-w-sm relative z-10 p-6"><h3 className="font-bold text-lg text-gray-800 mb-4">Form Pengaduan KPM</h3><form onSubmit={handleSimpanPengaduan} className="space-y-3"><div className="bg-red-50 p-2 rounded border border-red-100 mb-2"><label className="block text-[10px] font-bold text-red-600 uppercase mb-1">Petugas Penerima</label><p className="text-sm font-bold text-red-800">{currentUserData.nama}</p></div><div><label className="block text-xs font-bold text-gray-600 mb-1">Nama Pelapor (KPM)</label><input name="nama" required type="text" className="w-full p-2 border border-gray-300 rounded-lg text-sm"/></div><div><label className="block text-xs font-bold text-gray-600 mb-1">NIK</label><input name="nik" required type="text" className="w-full p-2 border border-gray-300 rounded-lg text-sm"/></div><div><label className="block text-xs font-bold text-gray-600 mb-1">Detail Pengaduan</label><textarea name="isi" required rows="3" className="w-full p-2 border border-gray-300 rounded-lg text-sm"></textarea></div><div className="flex gap-2 mt-4 pt-2"><button type="button" onClick={() => setShowPengaduanModal(false)} className="flex-1 py-2 bg-gray-100 rounded-lg font-bold text-sm hover:bg-gray-200">Batal</button><button type="submit" className="flex-1 py-2 bg-red-600 text-white rounded-lg font-bold text-sm hover:bg-red-700">Kirim</button></div></form></div></div>
         )}
         {showTindakLanjutModal && (
-          <div className="fixed inset-0 z-[70] flex items-center justify-center p-4"><div className="absolute inset-0 bg-black/60" onClick={() => setShowTindakLanjutModal(false)}></div><div className="bg-white rounded-xl shadow-2xl w-full max-w-sm relative z-10 p-6"><h3 className="font-bold text-lg text-gray-800 mb-4">Tindak Lanjut Pengaduan</h3><form onSubmit={handleTindakLanjut} className="space-y-3"><div><label className="block text-xs font-bold text-gray-600 mb-1">Ubah Status Tiket</label><select name="status" defaultValue={selectedPengaduan.status} className="w-full p-2 border border-gray-300 rounded-lg text-sm"><option>Diproses</option><option>Selesai</option></select></div><div><label className="block text-xs font-bold text-gray-600 mb-1">Catatan Tindak Lanjut</label><textarea name="tl" required rows="3" defaultValue={selectedPengaduan.tindakLanjut !== '-' ? selectedPengaduan.tindakLanjut : ''} className="w-full p-2 border border-gray-300 rounded-lg text-sm"></textarea></div><div className="flex gap-2 mt-4 pt-2"><button type="button" onClick={() => setShowTindakLanjutModal(false)} className="flex-1 py-2 bg-gray-100 text-gray-600 rounded-lg font-bold text-sm">Batal</button><button type="submit" className="flex-1 py-2 bg-blue-600 text-white rounded-lg font-bold text-sm">Simpan TL</button></div></form></div></div>
+          <div className="fixed inset-0 z-[70] flex items-center justify-center p-4"><div className="absolute inset-0 bg-black/60" onClick={() => setShowTindakLanjutModal(false)}></div><div className="bg-white rounded-xl shadow-2xl w-full max-w-sm relative z-10 p-6"><h3 className="font-bold text-lg text-gray-800 mb-4">Tindak Lanjut Pengaduan</h3><form onSubmit={(e) => { e.preventDefault(); setPengaduanData(prev => prev.map(p => p.id === selectedPengaduan.id ? {...p, tindakLanjut: e.target.tl.value, status: e.target.status.value} : p)); setShowTindakLanjutModal(false); showToast("Tindak lanjut pengaduan berhasil disimpan."); }} className="space-y-3"><div><label className="block text-xs font-bold text-gray-600 mb-1">Ubah Status Tiket</label><select name="status" defaultValue={selectedPengaduan?.status} className="w-full p-2 border border-gray-300 rounded-lg text-sm"><option>Diproses</option><option>Selesai</option></select></div><div><label className="block text-xs font-bold text-gray-600 mb-1">Catatan Tindak Lanjut</label><textarea name="tl" required rows="3" defaultValue={selectedPengaduan?.tindakLanjut !== '-' ? selectedPengaduan?.tindakLanjut : ''} className="w-full p-2 border border-gray-300 rounded-lg text-sm"></textarea></div><div className="flex gap-2 mt-4 pt-2"><button type="button" onClick={() => setShowTindakLanjutModal(false)} className="flex-1 py-2 bg-gray-100 rounded-lg font-bold text-sm hover:bg-gray-200">Batal</button><button type="submit" className="flex-1 py-2 bg-blue-600 text-white rounded-lg font-bold text-sm hover:bg-blue-700">Simpan TL</button></div></form></div></div>
         )}
       </div>
     );
@@ -898,7 +979,7 @@ export default function App() {
       {id:2, nama: 'Joko', tgl: '12 Apr', denda: aturanPiket.denda}
     ] : isKorcam ? [
       {id:1, nama: 'Ahmad', tgl: '10 Apr', denda: aturanPiket.denda}
-    ] : (denda ? [{id:1, nama: 'Anda (Ahmad)', tgl: '10 Apr', denda: aturanPiket.denda}] : []);
+    ] : (denda ? [{id:1, nama: `Anda (${currentUserData.nama})`, tgl: '10 Apr', denda: aturanPiket.denda}] : []);
     
     const totalDendaDisplay = tagihanData.reduce((sum, item) => sum + item.denda, 0);
 
@@ -913,7 +994,7 @@ export default function App() {
           <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 space-y-4">
             <h3 className="font-bold text-lg text-gray-800 mb-1">Capaian RHK Bulanan</h3>
             <p className="text-sm text-gray-600 mb-2">Centang Rencana Hasil Kerja (RHK) 1-9 yang telah terealisasi pada bulan ini.</p>
-            <div className="space-y-2 h-64 overflow-y-auto pr-2">
+            <div className="space-y-2 h-64 overflow-y-auto pr-2 scrollbar-hide">
               {rhkList.map(rhk => (
                 <label key={rhk.id} className="flex items-start p-3 border border-gray-200 rounded-lg cursor-pointer hover:bg-blue-50 transition-colors">
                   <input type="checkbox" className="mt-0.5 w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500" />
@@ -979,7 +1060,7 @@ export default function App() {
           <p className="text-xs text-blue-600 mt-1">Pilih nama KPM untuk merekam titik koordinat rumahnya.</p>
         </div>
         <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
-           <label className="block text-sm font-bold text-gray-700 mb-2">Daftar KPM (Dampingan {isKorkab ? 'Semua' : currentUser.nama}):</label>
+           <label className="block text-sm font-bold text-gray-700 mb-2">Daftar KPM (Dampingan {isKorkab ? 'Semua' : currentUserData.nama}):</label>
            <select className="w-full p-3 border border-gray-300 rounded-lg text-sm bg-gray-50 focus:ring-blue-500 mb-4">
              <option value="">-- Pilih KPM Dampingan --</option>
              {kpmList.map(k => <option key={k.id} value={k.id}>{k.nama} ({k.nik}) - Desa {k.desa}</option>)}
@@ -1058,8 +1139,8 @@ export default function App() {
           <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 space-y-4">
             <h3 className="font-bold text-gray-800 border-b pb-2 flex items-center"><UserSquare className="w-5 h-5 mr-2 text-blue-600"/> Pengaturan Profil</h3>
             <div className="space-y-3">
-              <div><label className="block text-xs font-bold text-gray-600 mb-1">Nama Lengkap</label><input type="text" defaultValue={currentUser.nama} className="w-full p-2 border rounded-lg text-sm bg-gray-50"/></div>
-              <div><label className="block text-xs font-bold text-gray-600 mb-1">Wilayah Tugas</label><input type="text" disabled defaultValue={currentUser.kec} className="w-full p-2 border border-gray-200 rounded-lg text-sm bg-gray-100 text-gray-500 font-bold"/></div>
+              <div><label className="block text-xs font-bold text-gray-600 mb-1">Nama Lengkap</label><input type="text" defaultValue={currentUserData.nama} className="w-full p-2 border rounded-lg text-sm bg-gray-50"/></div>
+              <div><label className="block text-xs font-bold text-gray-600 mb-1">Wilayah Tugas</label><input type="text" disabled defaultValue={currentUserData.kecamatan} className="w-full p-2 border border-gray-200 rounded-lg text-sm bg-gray-100 text-gray-500 font-bold"/></div>
             </div>
             <button onClick={() => showToast("Profil berhasil diperbarui!")} className="w-full py-3 bg-blue-600 text-white rounded-lg font-bold"><Save className="inline w-4 h-4 mr-2"/> Simpan Profil</button>
           </div>
@@ -1125,18 +1206,16 @@ export default function App() {
   // --- MAIN APP RETURN (ROOT LAYOUT) ---
   // ==========================================
   return (
-    <div className="bg-gray-100 min-h-screen font-sans text-gray-900">
-      <div className="max-w-md mx-auto bg-gray-50 min-h-screen shadow-2xl relative flex flex-col">
+    <div className="bg-gray-100 min-h-screen font-sans text-gray-900 flex justify-center">
+      <div className="w-full max-w-md bg-gray-50 min-h-screen shadow-2xl relative flex flex-col">
         {/* HEADER */}
         <header className="bg-blue-700 text-white p-4 flex items-center justify-between sticky top-0 z-20 shadow-md">
           <div className="flex items-center">
             <button onClick={() => setIsSidebarOpen(true)} className="mr-3 p-1 hover:bg-blue-600 rounded transition-colors"><Menu className="w-6 h-6" /></button>
             <h1 className="font-bold text-lg">PKH Tapin</h1>
           </div>
-          <select value={userRole} onChange={(e) => {setUserRole(e.target.value); setSelectedKPM(null); goToMenu('dashboard');}} className="text-[10px] bg-blue-800 text-white border-none rounded p-1 outline-none cursor-pointer">
-            <option value="pendamping">Pendamping</option>
-            <option value="ketuatim_kec">Ketua Tim Kec</option>
-            <option value="ketuatim_kab">Ketua Tim Kab (Admin)</option>
+          <select value={selectedUserId} onChange={(e) => { setSelectedUserId(e.target.value); setSelectedKPM(null); goToMenu('dashboard'); }} className="text-[10px] bg-blue-800 text-white border-none rounded p-1 outline-none cursor-pointer max-w-[120px] truncate">
+            {sdmData.map(s => <option key={s.id} value={s.id}>{s.nama} ({s.role === 'ketuatim_kab' ? 'Admin' : s.role === 'ketuatim_kec' ? 'Korcam' : 'SDM'})</option>)}
           </select>
         </header>
 
@@ -1182,10 +1261,10 @@ export default function App() {
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm relative z-10 p-6">
               <h3 className="font-bold text-lg text-gray-800 mb-4">{uploadType === 'kpm' ? "Upload Database KPM" : "Upload Akun Pendamping"}</h3>
               {uploadState === 'idle' && (
-                <label className="border-2 border-dashed border-gray-300 rounded-xl p-8 flex flex-col items-center justify-center text-gray-500 bg-gray-50 cursor-pointer hover:bg-gray-100 transition"><UploadCloud className="w-10 h-10 mb-2 text-blue-500" /><span className="text-sm font-medium">Pilih File Excel</span><input type="file" accept=".xlsx, .xls, .csv" className="hidden" onChange={(e) => { if (e.target.files.length) { setUploadState('uploading'); setTimeout(() => { setUploadState('result'); }, 2500); } }} /></label>
+                <label className="border-2 border-dashed border-gray-300 rounded-xl p-8 flex flex-col items-center justify-center text-gray-500 bg-gray-50 cursor-pointer hover:bg-gray-100 transition"><UploadCloud className="w-10 h-10 mb-2 text-blue-500" /><span className="text-sm font-medium">Pilih File Excel / CSV</span><input type="file" accept=".xlsx, .xls, .csv" className="hidden" onChange={(e) => { if (e.target.files.length) { setUploadState('uploading'); setTimeout(() => { handleSimulateImport(); }, 2500); } }} /></label>
               )}
-              {uploadState === 'uploading' && (<div className="py-8 flex flex-col items-center justify-center"><div className="w-12 h-12 border-4 border-gray-200 rounded-full animate-spin mb-4 border-t-blue-500"></div><p className="text-gray-600 font-medium">Memproses file Excel...</p></div>)}
-              {uploadState === 'result' && (<div className="py-4 text-center space-y-4"><CheckCircle className="w-16 h-16 mx-auto text-blue-500" /><h4 className="font-bold text-xl text-gray-800">Selesai!</h4><button onClick={() => { setUploadState('idle'); setShowUploadModal(false); showToast("Upload Selesai!"); }} className="w-full py-3 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 transition-colors">Tutup</button></div>)}
+              {uploadState === 'uploading' && (<div className="py-8 flex flex-col items-center justify-center"><div className="w-12 h-12 border-4 border-gray-200 rounded-full animate-spin mb-4 border-t-blue-500"></div><p className="text-gray-600 font-medium">Memproses dan import akun ke sistem...</p></div>)}
+              {uploadState === 'result' && (<div className="py-4 text-center space-y-4"><CheckCircle className="w-16 h-16 mx-auto text-blue-500" /><h4 className="font-bold text-xl text-gray-800">Import Berhasil!</h4><button onClick={() => { setUploadState('idle'); setShowUploadModal(false); showToast("Data disinkronisasi ke Cloud!"); }} className="w-full py-3 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 transition-colors">Tutup</button></div>)}
             </div>
           </div>
         )}
