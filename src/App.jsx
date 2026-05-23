@@ -35,6 +35,9 @@ import Peta from './pages/Peta';
 import AplikasiLainnya from './pages/AplikasiLainnya';
 import MasterDataManagement from './components/MasterDataManagement';
 
+// --- KONFIGURASI GOOGLE APPS SCRIPT URL ---
+const GLOBAL_GAS_URL = "https://script.google.com/macros/s/AKfycbyiOjCIEeFZAMF4HBZn6SSJP5qFsHcLOIIu-ndIBrGKUtoAchJBIm1rTxH75NmGA2Nd/exec";
+
 // --- DEFAULT DATA SEEDS ---
 const defaultSdm = [
   { 
@@ -218,6 +221,59 @@ export default function App() {
   const showToast = (msg) => { 
     setToastMessage(String(msg)); 
     setTimeout(() => setToastMessage(null), 4000); 
+  };
+
+  // ====================================================================
+  // ENGINE UPLOAD GOOGLE DRIVE (GAS INTEGRATION)
+  // ====================================================================
+  const uploadToGoogleDrive = async (file, folderName = 'Dokumentasi_PKH_Tapin') => {
+    return new Promise((resolve, reject) => {
+      if (!file) return reject(new Error("Tidak ada file yang dipilih."));
+      
+      setIsSaving(true);
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = async () => {
+        try {
+          const base64Data = reader.result.split(',')[1];
+          const payload = {
+            fileName: file.name,
+            mimeType: file.type,
+            data: base64Data,
+            folderName: folderName
+          };
+
+          const response = await fetch(GLOBAL_GAS_URL, {
+            method: 'POST',
+            body: JSON.stringify(payload),
+            headers: {
+               // Text/plain menghindari block pre-flight CORS di GAS
+               "Content-Type": "text/plain;charset=utf-8",
+            }
+          });
+
+          const result = await response.json();
+          if (result.status === 'success') {
+            setIsSaving(false);
+            showToast("Foto berhasil diamankan ke Google Drive!");
+            resolve(result.fileUrl);
+          } else {
+            setIsSaving(false);
+            showToast("Gagal mengunggah ke Drive: " + result.message);
+            reject(new Error(result.message || "Upload gagal"));
+          }
+        } catch (err) {
+          setIsSaving(false);
+          showToast("Koneksi ke Google Drive terputus.");
+          reject(err);
+        }
+      };
+      reader.onerror = (error) => {
+        setIsSaving(false);
+        showToast("Gagal membaca file foto.");
+        reject(error);
+      };
+    });
   };
 
   // ====================================================================
@@ -1015,6 +1071,7 @@ export default function App() {
                 safeTasksData={safeTasksDataToPass} 
                 safeVotesData={safeVotesDataToPass} 
                 goToMenu={goToMenu} 
+                uploadToGoogleDrive={uploadToGoogleDrive}
               />
             )}
 
@@ -1028,6 +1085,7 @@ export default function App() {
                 dbDelete={dbDelete} 
                 dbAdd={dbAdd} 
                 showToast={showToast} 
+                uploadToGoogleDrive={uploadToGoogleDrive}
               />
             )}
 
@@ -1054,6 +1112,7 @@ export default function App() {
                 currentUserData={currentUserData} 
                 activeSdmList={activeSdmList} 
                 aturanPiket={aturanPiket} 
+                uploadToGoogleDrive={uploadToGoogleDrive}
               />
             )}
 
@@ -1069,6 +1128,7 @@ export default function App() {
                 dbUpdate={dbUpdate} 
                 currentUserData={currentUserData} 
                 aturanPiket={aturanPiket} 
+                uploadToGoogleDrive={uploadToGoogleDrive}
               />
             )}
 
@@ -1099,6 +1159,7 @@ export default function App() {
                 setSelectedVote={setSelectedVote} 
                 setShowTambahJadwalModal={setShowTambahJadwalModal} 
                 setShowIsiJadwalModal={setShowIsiJadwalModal} 
+                uploadToGoogleDrive={uploadToGoogleDrive}
               />
             )}
 
@@ -1109,6 +1170,7 @@ export default function App() {
                 setShowPengaduanModal={setShowPengaduanModal} 
                 setSelectedPengaduan={setSelectedPengaduan} 
                 setShowTindakLanjutModal={setShowTindakLanjutModal} 
+                uploadToGoogleDrive={uploadToGoogleDrive}
               />
             )} 
 
@@ -1120,6 +1182,7 @@ export default function App() {
                 currentUserData={currentUserData} 
                 aturanPiket={aturanPiket} 
                 showToast={showToast} 
+                uploadToGoogleDrive={uploadToGoogleDrive}
               />
             )}
 
