@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
-  Search, Plus, MapPin, CreditCard, Shield, Database, CheckCircle, Filter, ChevronDown
+  Search, Plus, MapPin, CreditCard, Shield, Database, CheckCircle, Filter, ChevronDown, ArrowUpDown
 } from 'lucide-react';
 
 export default function KPMList({ 
@@ -14,6 +14,9 @@ export default function KPMList({
 }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedDesaFilter, setSelectedDesaFilter] = useState('SEMUA');
+  
+  // STATE TAMBAHAN UNTUK SORTING / PENGURUTAN
+  const [sortBy, setSortBy] = useState('nama_asc');
   
   // STATE UNTUK LAZY LOADING (PAGINASI CERDAS)
   const [displayLimit, setDisplayLimit] = useState(50);
@@ -91,7 +94,7 @@ export default function KPMList({
     return [...new Set(list)].sort();
   }, [roleFilteredData]);
 
-  const searchFilteredData = roleFilteredData.filter(k => {
+  let searchFilteredData = roleFilteredData.filter(k => {
     const term = searchTerm.toLowerCase();
     const nama = getVal(k, 'nama').toLowerCase();
     const nik = getVal(k, 'nik').toLowerCase();
@@ -106,6 +109,15 @@ export default function KPMList({
     return isMatchSearch && isMatchDesa;
   });
 
+  // LOGIKA SORTING BERDASARKAN NAMA KPM
+  searchFilteredData = searchFilteredData.sort((a, b) => {
+    const nameA = getVal(a, 'nama').toLowerCase();
+    const nameB = getVal(b, 'nama').toLowerCase();
+    if (sortBy === 'nama_asc') return nameA.localeCompare(nameB);
+    if (sortBy === 'nama_desc') return nameB.localeCompare(nameA);
+    return 0;
+  });
+
   const myPotensial = searchFilteredData.filter(k => String(k.type) === 'potensial');
   const myGraduasi = searchFilteredData.filter(k => String(k.type) === 'graduasi');
   const myUtama = searchFilteredData.filter(k => String(k.type) !== 'potensial' && String(k.type) !== 'graduasi');
@@ -113,7 +125,7 @@ export default function KPMList({
   // Reset limit paginasi ketika user melakukan pencarian atau ganti tab
   useEffect(() => {
     setDisplayLimit(50);
-  }, [searchTerm, selectedDesaFilter, kpmMainTab]);
+  }, [searchTerm, selectedDesaFilter, kpmMainTab, sortBy]);
 
   const loadMoreData = () => {
     setDisplayLimit(prev => prev + 50);
@@ -162,7 +174,20 @@ export default function KPMList({
           </div>
         </div>
         
-        <div className="relative md:w-64">
+        {/* DROPDOWN SORTIR (BARU) */}
+        <div className="relative md:w-48">
+          <ArrowUpDown className="absolute left-5 top-1/2 -translate-y-1/2 w-5 h-5 text-indigo-400 pointer-events-none" />
+          <select 
+            value={sortBy} 
+            onChange={(e) => setSortBy(e.target.value)} 
+            className={`${inputClass} pl-14 appearance-none cursor-pointer border-indigo-100 bg-indigo-50/30 focus:border-indigo-500 focus:ring-indigo-100 text-indigo-900`}
+          >
+            <option value="nama_asc">Sort: A - Z</option>
+            <option value="nama_desc">Sort: Z - A</option>
+          </select>
+        </div>
+
+        <div className="relative md:w-56">
           <Filter className="absolute left-5 top-1/2 -translate-y-1/2 w-5 h-5 text-indigo-400 pointer-events-none" />
           <select 
             value={selectedDesaFilter} 
