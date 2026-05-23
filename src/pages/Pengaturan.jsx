@@ -20,6 +20,8 @@ export default function Pengaturan(props) {
   // =========================================================================
   const [userName, setUserName] = useState(currentUserData?.nama || '');
   const [userPassword, setUserPassword] = useState(currentUserData?.password || '');
+  // TAMBAHAN BLUEPRINT: State untuk menyimpan Link Google Drive pribadi pendamping
+  const [userDriveLink, setUserDriveLink] = useState(currentUserData?.userDriveLink || '');
   const [uploadingFoto, setUploadingFoto] = useState(false);
 
   // =========================================================================
@@ -109,9 +111,10 @@ export default function Pengaturan(props) {
     if (currentUserData && currentUserData.id) {
        await dbUpdate('sdmData', currentUserData.id, { 
          nama: userName,
-         password: userPassword
+         password: userPassword,
+         userDriveLink: userDriveLink // TAMBAHAN BLUEPRINT: Menyimpan Link Folder ke Database
        });
-       showToast("Profil Login Anda Berhasil Disimpan!");
+       showToast("Profil Login & Tautan Drive Berhasil Disimpan!");
     }
   };
 
@@ -198,7 +201,7 @@ export default function Pengaturan(props) {
                <Info className="w-6 h-6 text-blue-600 shrink-0 mt-0.5" />
                <div>
                   <p className="text-sm text-blue-900 font-bold leading-relaxed">
-                    Anda dapat mengubah nama tampilan dan sandi/password untuk masuk ke aplikasi. Foto profil juga dapat diunggah dengan mengetuk gambar profil di atas.
+                    Anda dapat mengubah nama tampilan dan sandi/password untuk masuk ke aplikasi. Serta mengatur Folder Google Drive target untuk dokumentasi.
                   </p>
                </div>
              </div>
@@ -230,6 +233,30 @@ export default function Pengaturan(props) {
                     placeholder="Password login aplikasi..." 
                     className="w-full p-5 border border-slate-200 rounded-[1.5rem] focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all font-bold text-sm text-slate-700 bg-slate-50/50 focus:bg-white"
                   />
+                </div>
+
+                {/* ========================================================================= */}
+                {/* TAMBAHAN BLUEPRINT: Kolom Input Tautan Drive Pribadi Pendamping */}
+                {/* ========================================================================= */}
+                <div>
+                  <label className="block text-[11px] font-black text-slate-500 uppercase tracking-widest mb-3 ml-1 transition-colors">
+                    Tautan / Link Folder Google Drive Anda
+                  </label>
+                  <div className="flex relative">
+                    <div className="absolute inset-y-0 left-0 pl-5 flex items-center pointer-events-none">
+                      <Cloud className="w-5 h-5 text-slate-400" />
+                    </div>
+                    <input 
+                      type="url" 
+                      value={userDriveLink}
+                      onChange={(e) => setUserDriveLink(e.target.value)}
+                      placeholder="Paste Link Folder Google Drive di sini..." 
+                      className="w-full pl-14 p-5 border border-slate-200 rounded-[1.5rem] focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all font-bold text-sm text-slate-700 bg-slate-50/50 focus:bg-white"
+                    />
+                  </div>
+                  <p className="text-[10px] text-slate-500 font-bold mt-2 ml-1 italic">
+                    *Tautan ini WAJIB diisi agar seluruh foto dan dokumen KPM wilayah Anda tersimpan secara rapi di Drive yang Anda tentukan.
+                  </p>
                 </div>
 
                 <div className="flex justify-end pt-4">
