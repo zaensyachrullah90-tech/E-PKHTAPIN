@@ -208,7 +208,17 @@ export default function KPMDetail({
         subFolder: mappingFolder[tipeFoto] || 'Lain-lain'
       };
 
-      const res = await fetch(masterGasUrl, { method: 'POST', mode: 'cors', body: JSON.stringify(payload) });
+      // =========================================================================
+      // BYPASS CORS SECURITY: Gunakan text/plain
+      // =========================================================================
+      const res = await fetch(masterGasUrl, { 
+        method: 'POST', 
+        headers: {
+          "Content-Type": "text/plain;charset=utf-8",
+        },
+        body: JSON.stringify(payload) 
+      });
+      
       const result = await res.json();
       
       if(result.url) {
@@ -385,7 +395,6 @@ export default function KPMDetail({
                   </>
                )}
             </label>
-            {/* PERBAIKAN: Menghapus atribut capture="environment" untuk membolehkan upload dari HP Galeri */}
             <input type="file" id="upload-foto-profil" accept="image/*" className="hidden" onChange={(e) => handleUploadFoto(e, 'foto_profil')} disabled={uploadingTipe === 'foto_profil'} />
           </div>
           
@@ -547,7 +556,6 @@ export default function KPMDetail({
                 <Cloud className="w-7 h-7 text-indigo-600 shrink-0" />
                 <p className="text-sm text-indigo-900 font-bold leading-relaxed">
                   Penyimpanan Terintegrasi: Google Drive.<br/>
-                  {/* PERBAIKAN: Teks Indikator Deteksi ID Drive */}
                   <span className="text-xs font-medium opacity-80 mt-2 block bg-indigo-100 p-2 rounded-lg border border-indigo-200">
                      <b>Tautan Disimpan:</b> {currentUserData?.userDriveLink || 'Belum diatur.'}<br/>
                      <b>ID Folder Terbaca:</b> {extractIdFromUrl(currentUserData?.userDriveLink) || 'GAGAL MEMBACA ID. Cek kembali tautan Drive Anda!'}
@@ -571,7 +579,6 @@ export default function KPMDetail({
                         <div className="w-full h-48 bg-slate-50 border-2 border-dashed border-slate-200 rounded-3xl mb-5 flex flex-col items-center justify-center text-slate-300 group-hover:border-blue-200 transition-colors"><ImageIcon className="w-10 h-10 mb-2 opacity-30" /><span className="text-[10px] font-black uppercase tracking-tight">Belum Ada Data Foto</span></div>
                       )}
                       <div className="relative w-full">
-                        {/* PERBAIKAN: Menghapus atribut capture="environment" untuk membolehkan upload dari HP Galeri */}
                         <input type="file" id={`file-${item.key}`} accept="image/*" className="hidden" onChange={(e) => handleUploadFoto(e, item.key)} disabled={isLoad} />
                         <button onClick={() => document.getElementById(`file-${item.key}`).click()} disabled={isLoad} className={`w-full py-4 rounded-2xl text-[11px] font-black uppercase tracking-widest transition-all shadow-sm flex items-center justify-center ${isLoad ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-slate-100 hover:bg-blue-600 hover:text-white text-slate-700'}`}>
                           {isLoad ? <Loader2 className="w-4 h-4 mr-2 animate-spin"/> : <UploadCloud className="w-4 h-4 mr-2"/>}{isLoad ? 'Mengunggah...' : (fotoUrl ? 'Ganti Foto' : 'Ambil Foto')}
