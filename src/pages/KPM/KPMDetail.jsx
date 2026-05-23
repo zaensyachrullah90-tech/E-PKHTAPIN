@@ -28,15 +28,13 @@ export default function KPMDetail({
   const [compForm, setCompForm] = useState({});
 
   // =========================================================================
-  // PERBAIKAN: REGEX EXTRACTION UNTUK BACA LINK DRIVE ATAU ID LANGSUNG
+  // HELPER EXTRACTION BACA LINK ATAU ID LANGSUNG
   // =========================================================================
   const extractIdFromUrl = (url) => {
     if (!url) return '';
     const cleanUrl = String(url).trim();
-    // Coba ekstrak pola standar link Google Drive
     const match = cleanUrl.match(/(?:id=|\/d\/|\/folders\/)([-\w]{25,})/);
     if (match && match[1]) return match[1];
-    // Jika tidak ada pola link, tapi stringnya panjang seperti ID, anggap itu ID langsung
     const matchFallback = cleanUrl.match(/^[-\w]{25,}$/);
     return matchFallback ? matchFallback[0] : cleanUrl;
   };
@@ -159,12 +157,17 @@ export default function KPMDetail({
     if(!file) return;
 
     const masterGasUrl = aturanPiket?.masterGasUrl;
-    const userFolderLink = currentUserData?.userDriveLink;
-    const folderId = extractIdFromUrl(userFolderLink);
+    
+    // =========================================================================
+    // FIX KOSONG: Fallback Otomatis ke Master Drive ID
+    // =========================================================================
+    let folderId = extractIdFromUrl(currentUserData?.userDriveLink);
+    if (!folderId || folderId.length < 10) {
+      folderId = extractIdFromUrl(aturanPiket?.masterDriveId);
+    }
 
-    // Validasi Diperjelas Untuk Tahu Bagian Mana Yang Kosong
     if(!masterGasUrl || !folderId) {
-      showToast(`Gagal! Cek Pengaturan Master. GAS: ${masterGasUrl ? 'Ada' : 'KOSONG'}, Drive ID: ${folderId ? 'Ada' : 'KOSONG'}`);
+      showToast(`Gagal! Cek Pengaturan. GAS: ${masterGasUrl ? 'Ada' : 'KOSONG'}, Drive ID: ${folderId ? 'Ada' : 'KOSONG'}`);
       return;
     }
 
@@ -175,7 +178,7 @@ export default function KPMDetail({
       let finalMimeType = file.type;
 
       if (file.type.startsWith('image/')) {
-        showToast("Memproses kompresi gambar otomatis...");
+        showToast("Memproses gambar...");
         base64Data = await compressImage(file);
         finalMimeType = 'image/jpeg';
       } else {
@@ -208,9 +211,6 @@ export default function KPMDetail({
         subFolder: mappingFolder[tipeFoto] || 'Lain-lain'
       };
 
-      // =========================================================================
-      // BYPASS CORS SECURITY: Gunakan text/plain
-      // =========================================================================
       const res = await fetch(masterGasUrl, { 
         method: 'POST', 
         headers: {
@@ -221,11 +221,11 @@ export default function KPMDetail({
       
       const result = await res.json();
       
-      if(result.url) {
+      if(result.status === 'success' || result.url) {
         const dbNode = selectedKPM.bansos_type === 'PKH' ? 'kpmPkhData' : selectedKPM.bansos_type === 'Sembako' ? 'kpmSembakoData' : 'kpmData';
         await dbUpdate(dbNode, selectedKPM.id, { [tipeFoto]: result.url });
         selectedKPM[tipeFoto] = result.url;
-        showToast(`Selesai! Foto berhasil tersimpan di sub-folder ${payload.subFolder}.`);
+        showToast(`Selesai! Foto berhasil tersimpan di Drive.`);
       } else {
         showToast("Error Script Drive: " + (result.error || "Gagal upload"));
       }
@@ -354,7 +354,6 @@ export default function KPMDetail({
 
   return (
     <div className="space-y-6 animate-in fade-in pb-10 max-w-5xl mx-auto">
-      
       <div className="flex flex-col sm:flex-row gap-3">
         <button onClick={() => setSelectedKPM(null)} className="flex items-center justify-center text-slate-600 font-black text-sm bg-white border border-slate-200 px-6 py-3.5 rounded-2xl shadow-sm transition-all hover:-translate-x-1">
           <ChevronLeft className="w-5 h-5 mr-1" /> Kembali
@@ -377,22 +376,17 @@ export default function KPMDetail({
       <div className="bg-white rounded-[2.5rem] shadow-sm border border-slate-200 overflow-hidden">
         <div className="bg-gradient-to-br from-blue-700 via-blue-900 to-slate-900 p-12 text-center text-white relative overflow-hidden">
           <div className="absolute top-0 right-0 w-80 h-80 bg-white opacity-5 rounded-full blur-[100px]"></div>
-          
           <div className="relative mx-auto w-32 h-32 mb-6 group relative z-10">
             {selectedKPM.foto_profil ? (
               <img src={selectedKPM.foto_profil} alt="Profil KPM" className="w-full h-full object-cover rounded-[2rem] border-4 border-white/20 shadow-2xl" />
             ) : (
               <UserSquare className="w-full h-full p-6 bg-white/10 backdrop-blur-md rounded-[2rem] text-white border border-white/20 shadow-2xl" />
             )}
-            
             <label htmlFor="upload-foto-profil" className="absolute inset-0 bg-slate-900/60 rounded-[2rem] opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center cursor-pointer transition-all backdrop-blur-sm">
                {uploadingTipe === 'foto_profil' ? (
                   <Loader2 className="w-8 h-8 text-white animate-spin" />
                ) : (
-                  <>
-                    <Camera className="w-8 h-8 text-white mb-2" />
-                    <span className="text-[10px] font-black text-white uppercase tracking-widest text-center px-2">Ganti Foto</span>
-                  </>
+                  <><Camera className="w-8 h-8 text-white mb-2" /><span className="text-[10px] font-black text-white uppercase tracking-widest text-center px-2">Ganti Foto</span></>
                )}
             </label>
             <input type="file" id="upload-foto-profil" accept="image/*" className="hidden" onChange={(e) => handleUploadFoto(e, 'foto_profil')} disabled={uploadingTipe === 'foto_profil'} />
@@ -416,13 +410,10 @@ export default function KPMDetail({
         </div>
 
         <div className="p-8 lg:p-12">
-          
           {kpmDetailTab === 'profil' && (
             <div className="space-y-10 animate-in slide-in-from-bottom-2">
               <div>
-                 <h3 className="font-black text-slate-800 mb-5 flex items-center text-xl border-b border-slate-100 pb-4">
-                    <UserSquare className="w-6 h-6 mr-3 text-blue-600"/> Biodata Lengkap Pengurus (KPM)
-                 </h3>
+                 <h3 className="font-black text-slate-800 mb-5 flex items-center text-xl border-b border-slate-100 pb-4"><UserSquare className="w-6 h-6 mr-3 text-blue-600"/> Biodata Lengkap Pengurus (KPM)</h3>
                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-y-8 gap-x-6 bg-slate-50 p-8 rounded-[2rem] border border-slate-200 shadow-sm">
                     <div className="flex flex-col"><span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Tempat, Tanggal Lahir</span><span className="text-base font-bold text-slate-800">{safeValRender(selectedKPM?.ttl)}</span></div>
                     <div className="flex flex-col"><span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Nama Ibu Kandung</span><span className="text-base font-bold text-slate-800 uppercase">{safeValRender(selectedKPM?.nama_ibu)}</span></div>
@@ -430,12 +421,7 @@ export default function KPMDetail({
                     <div className="flex flex-col"><span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Pekerjaan Saat Ini</span><span className="text-base font-bold text-slate-800 uppercase">{safeValRender(selectedKPM?.pekerjaan)}</span></div>
                     <div className="flex flex-col"><span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">No Handphone / WA</span><span className="text-base font-bold text-slate-800">{safeValRender(selectedKPM?.no_hp)}</span></div>
                     <div className="flex flex-col"><span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Usaha / Potensi Ekonomi</span><span className="text-base font-bold text-teal-700 uppercase">{safeValRender(selectedKPM?.usaha || selectedKPM?.potensi)}</span></div>
-                    
-                    <div className="flex flex-col sm:col-span-2 lg:col-span-3 pt-4 border-t border-slate-200">
-                       <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Alamat Lengkap Domisili KPM</span>
-                       <span className="text-lg font-black text-slate-800 uppercase leading-relaxed">{displayAlamat || '-'}, Ds. {displayDesa || '-'}, Kec. {displayKecamatan || '-'}</span>
-                    </div>
-                    
+                    <div className="flex flex-col sm:col-span-2 lg:col-span-3 pt-4 border-t border-slate-200"><span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Alamat Lengkap Domisili KPM</span><span className="text-lg font-black text-slate-800 uppercase leading-relaxed">{displayAlamat || '-'}, Ds. {displayDesa || '-'}, Kec. {displayKecamatan || '-'}</span></div>
                     <div className="flex flex-col pt-4 border-t border-slate-200"><span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">No. Kartu Keluarga</span><span className="text-base font-bold text-indigo-700">{displayKk || '-'}</span></div>
                     <div className="flex flex-col pt-4 border-t border-slate-200"><span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">No. KKS / Rekening Bank</span><span className="text-base font-bold text-blue-700">{displayKKS || '-'}</span></div>
                     <div className="flex flex-col pt-4 border-t border-slate-200"><span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Nama Pendamping Sosial</span><span className="text-base font-black text-slate-800 uppercase">{displayPendamping || '-'}</span></div>
@@ -462,9 +448,7 @@ export default function KPMDetail({
                       </div>
                     </div>
                   )) : (
-                    <div className="col-span-full p-10 text-center bg-slate-50 border-2 border-dashed border-slate-200 rounded-3xl">
-                      <p className="text-sm font-bold text-slate-400 uppercase tracking-widest">Belum ada data anggota keluarga yang diinput.</p>
-                    </div>
+                    <div className="col-span-full p-10 text-center bg-slate-50 border-2 border-dashed border-slate-200 rounded-3xl"><p className="text-sm font-bold text-slate-400 uppercase tracking-widest">Belum ada data anggota keluarga yang diinput.</p></div>
                   )}
                 </div>
               </div>
@@ -507,9 +491,7 @@ export default function KPMDetail({
                     <div key={`leg-edu-${i}`} className="p-6 border rounded-[2rem] shadow-sm bg-blue-50/30 border-blue-100">
                        <div className="flex items-center gap-3 mb-3"><BookOpen className="w-6 h-6 text-blue-500"/><span className="text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-lg border bg-blue-100 text-blue-700 border-blue-200">Pendidikan (Lama)</span></div>
                        <h4 className="font-black text-slate-800 text-lg uppercase mb-4">{String(k.nama || '')}</h4>
-                       <div className="space-y-2 text-xs font-bold text-slate-700 bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
-                          <p><span className="text-slate-400 w-24 inline-block uppercase">Sekolah</span>: <span className="text-blue-700">{String(k.sekolah || '-')}</span></p>
-                       </div>
+                       <div className="space-y-2 text-xs font-bold text-slate-700 bg-white p-4 rounded-2xl border border-slate-100 shadow-sm"><p><span className="text-slate-400 w-24 inline-block uppercase">Sekolah</span>: <span className="text-blue-700">{String(k.sekolah || '-')}</span></p></div>
                     </div>
                   ))}
 
@@ -517,33 +499,24 @@ export default function KPMDetail({
                     <div key={`leg-kes-${i}`} className="p-6 border rounded-[2rem] shadow-sm bg-emerald-50/30 border-emerald-100">
                        <div className="flex items-center gap-3 mb-3"><HeartPulse className="w-6 h-6 text-emerald-500"/><span className="text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-lg border bg-emerald-100 text-emerald-700 border-emerald-200">Kesehatan (Lama)</span></div>
                        <h4 className="font-black text-slate-800 text-lg uppercase mb-4">{String(k.nama || '')}</h4>
-                       <div className="space-y-2 text-xs font-bold text-slate-700 bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
-                          <p><span className="text-slate-400 w-24 inline-block uppercase">Faskes</span>: <span className="text-emerald-700">{String(k.tempatPeriksa || '-')}</span></p>
-                       </div>
+                       <div className="space-y-2 text-xs font-bold text-slate-700 bg-white p-4 rounded-2xl border border-slate-100 shadow-sm"><p><span className="text-slate-400 w-24 inline-block uppercase">Faskes</span>: <span className="text-emerald-700">{String(k.tempatPeriksa || '-')}</span></p></div>
                     </div>
                   ))}
 
                   {(!selectedKPM?.komponen_detail?.length && !selectedKPM?.komponen?.pendidikan?.length && !selectedKPM?.komponen?.kesehatan?.length) && (
-                     <div className="col-span-full p-10 text-center bg-slate-50 border-2 border-dashed border-slate-200 rounded-3xl">
-                       <p className="text-sm font-bold text-slate-400 uppercase tracking-widest">Belum ada rincian data komponen bantuan yang diinput.</p>
-                     </div>
+                     <div className="col-span-full p-10 text-center bg-slate-50 border-2 border-dashed border-slate-200 rounded-3xl"><p className="text-sm font-bold text-slate-400 uppercase tracking-widest">Belum ada rincian data komponen bantuan yang diinput.</p></div>
                   )}
                 </div>
               </div>
 
               <div className="bg-slate-50 border border-slate-200 p-8 rounded-[2.5rem]">
-                 <h4 className="font-black text-slate-800 border-b border-slate-200 pb-5 mb-6 flex items-center text-lg uppercase tracking-wider">
-                   <Info className="w-6 h-6 mr-3 text-indigo-600"/> Rincian Mentah (Dari Database Excel)
-                 </h4>
+                 <h4 className="font-black text-slate-800 border-b border-slate-200 pb-5 mb-6 flex items-center text-lg uppercase tracking-wider"><Info className="w-6 h-6 mr-3 text-indigo-600"/> Rincian Mentah (Dari Database Excel)</h4>
                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-8 gap-x-6">
                     {Object.keys(selectedKPM).filter(key => 
                       !['id', 'nama', 'nama_pengurus', 'namapengurus', 'nik', 'no_nik', 'no_kk', 'nokk', 'kartu_keluarga', 'kecamatan', 'kec', 'desa', 'kel', 'desa_kel', 'kelurahan', 'alamat', 'domisili', 'bansos_type', 'uploadIndex', 'type', 'potensi', 'keluarga', 'komponen', 'status_kpm', 'komponen_detail', 'ttl', 'nama_ibu', 'pendidikan', 'pekerjaan', 'no_hp', 'usaha', 'foto_profil'].includes(key) && 
                       !key.startsWith('foto_') && !key.startsWith('berkas_')
                     ).map(key => (
-                      <div key={key} className="flex flex-col border-b border-slate-200 pb-4">
-                         <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">{String(key).replace(/_/g, ' ')}</span>
-                         <span className="text-base font-bold text-slate-800 uppercase">{safeValRender(selectedKPM[key])}</span>
-                      </div>
+                      <div key={key} className="flex flex-col border-b border-slate-200 pb-4"><span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">{String(key).replace(/_/g, ' ')}</span><span className="text-base font-bold text-slate-800 uppercase">{safeValRender(selectedKPM[key])}</span></div>
                     ))}
                  </div>
               </div>
@@ -557,8 +530,8 @@ export default function KPMDetail({
                 <p className="text-sm text-indigo-900 font-bold leading-relaxed">
                   Penyimpanan Terintegrasi: Google Drive.<br/>
                   <span className="text-xs font-medium opacity-80 mt-2 block bg-indigo-100 p-2 rounded-lg border border-indigo-200">
-                     <b>Tautan Disimpan:</b> {currentUserData?.userDriveLink || 'Belum diatur.'}<br/>
-                     <b>ID Folder Terbaca:</b> {extractIdFromUrl(currentUserData?.userDriveLink) || 'GAGAL MEMBACA ID. Cek kembali tautan Drive Anda!'}
+                     <b>Tautan Disimpan:</b> {currentUserData?.userDriveLink || aturanPiket?.masterDriveId || 'Belum diatur.'}<br/>
+                     <b>ID Folder Terbaca:</b> {extractIdFromUrl(currentUserData?.userDriveLink) || extractIdFromUrl(aturanPiket?.masterDriveId) || 'GAGAL MEMBACA ID. Cek kembali tautan Drive Anda!'}
                   </span>
                 </p>
               </div>
@@ -601,18 +574,10 @@ export default function KPMDetail({
                      <div>
                        <label className="block text-[11px] font-black text-orange-700 uppercase tracking-widest mb-2">Pilih Status Pengajuan</label>
                        <select name="kategori_status" required className="w-full p-5 border border-orange-200 rounded-2xl focus:ring-4 focus:ring-orange-100 outline-none font-bold text-slate-700 bg-white">
-                          <option value="">-- Pilih Status --</option>
-                          <option value="Usulan Potensial">Usulan KPM Potensial</option>
-                          <option value="Sudah Potensial">Sudah Ditetapkan Potensial</option>
-                          <option value="Usulan Graduasi">Usulan Graduasi</option>
-                          <option value="Sudah Graduasi">Sudah Ditetapkan Graduasi</option>
-                          <option value="Aktif Kembali">Batal / Aktif Kembali (KPM Utama)</option>
+                          <option value="">-- Pilih Status --</option><option value="Usulan Potensial">Usulan KPM Potensial</option><option value="Sudah Potensial">Sudah Ditetapkan Potensial</option><option value="Usulan Graduasi">Usulan Graduasi</option><option value="Sudah Graduasi">Sudah Ditetapkan Graduasi</option><option value="Aktif Kembali">Batal / Aktif Kembali (KPM Utama)</option>
                        </select>
                      </div>
-                     <div>
-                       <label className="block text-[11px] font-black text-orange-700 uppercase tracking-widest mb-2">Keterangan / Alasan (Contoh: Mampu / Pindah / Punya Usaha)</label>
-                       <input type="text" name="alasan" required className="w-full p-5 border border-orange-200 rounded-2xl focus:ring-4 focus:ring-orange-100 outline-none font-bold text-slate-700 bg-white" />
-                     </div>
+                     <div><label className="block text-[11px] font-black text-orange-700 uppercase tracking-widest mb-2">Keterangan / Alasan (Contoh: Mampu / Pindah / Punya Usaha)</label><input type="text" name="alasan" required className="w-full p-5 border border-orange-200 rounded-2xl focus:ring-4 focus:ring-orange-100 outline-none font-bold text-slate-700 bg-white" /></div>
                      <button type="submit" className="px-10 py-4 bg-orange-600 text-white font-black rounded-2xl hover:bg-orange-700 shadow-lg shadow-orange-500/30 transition-all uppercase tracking-widest text-[11px]">Simpan Perubahan Status</button>
                    </form>
                 </div>
@@ -651,8 +616,7 @@ export default function KPMDetail({
                 <div className="md:col-span-2">
                   <label className="block text-[11px] font-black text-slate-500 mb-2 uppercase tracking-widest">Status Kepesertaan KPM</label>
                   <select value={editForm.status_kpm} onChange={(e) => setEditForm({...editForm, status_kpm: e.target.value})} className="w-full p-5 border border-slate-200 rounded-2xl focus:border-blue-500 focus:ring-4 focus:ring-blue-100 outline-none text-base font-black text-slate-800 bg-blue-50/30">
-                    <option value="Aktif">KPM Aktif (Bansos Berjalan)</option>
-                    <option value="Tidak Aktif">KPM Tidak Aktif (Ditangguhkan / Dll)</option>
+                    <option value="Aktif">KPM Aktif (Bansos Berjalan)</option><option value="Tidak Aktif">KPM Tidak Aktif (Ditangguhkan / Dll)</option>
                   </select>
                 </div>
                 <div><label className="block text-[11px] font-black text-slate-500 mb-2 uppercase tracking-widest">Nama Lengkap</label><input type="text" value={editForm.nama} onChange={(e) => setEditForm({...editForm, nama: e.target.value})} className="w-full p-4 border border-slate-200 rounded-2xl focus:border-blue-500 outline-none text-sm font-bold text-slate-700 bg-slate-50 focus:bg-white" /></div>
