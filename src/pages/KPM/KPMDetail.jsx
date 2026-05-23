@@ -27,10 +27,18 @@ export default function KPMDetail({
   const [famForm, setFamForm] = useState({});
   const [compForm, setCompForm] = useState({});
 
+  // =========================================================================
+  // PERBAIKAN: REGEX EXTRACTION UNTUK BACA LINK DRIVE ATAU ID LANGSUNG
+  // =========================================================================
   const extractIdFromUrl = (url) => {
     if (!url) return '';
-    const match = url.match(/[-\w]{25,}/);
-    return match ? match[0] : '';
+    const cleanUrl = String(url).trim();
+    // Coba ekstrak pola standar link Google Drive
+    const match = cleanUrl.match(/(?:id=|\/d\/|\/folders\/)([-\w]{25,})/);
+    if (match && match[1]) return match[1];
+    // Jika tidak ada pola link, tapi stringnya panjang seperti ID, anggap itu ID langsung
+    const matchFallback = cleanUrl.match(/^[-\w]{25,}$/);
+    return matchFallback ? matchFallback[0] : cleanUrl;
   };
 
   const getVal = (obj, targetType) => {
@@ -154,8 +162,9 @@ export default function KPMDetail({
     const userFolderLink = currentUserData?.userDriveLink;
     const folderId = extractIdFromUrl(userFolderLink);
 
+    // Validasi Diperjelas Untuk Tahu Bagian Mana Yang Kosong
     if(!masterGasUrl || !folderId) {
-      showToast("Gagal! Admin belum mengatur Master Script atau Anda belum mengisi Link Drive.");
+      showToast(`Gagal! Cek Pengaturan Master. GAS: ${masterGasUrl ? 'Ada' : 'KOSONG'}, Drive ID: ${folderId ? 'Ada' : 'KOSONG'}`);
       return;
     }
 
@@ -376,7 +385,8 @@ export default function KPMDetail({
                   </>
                )}
             </label>
-            <input type="file" id="upload-foto-profil" accept="image/*" capture="environment" className="hidden" onChange={(e) => handleUploadFoto(e, 'foto_profil')} disabled={uploadingTipe === 'foto_profil'} />
+            {/* PERBAIKAN: Menghapus atribut capture="environment" untuk membolehkan upload dari HP Galeri */}
+            <input type="file" id="upload-foto-profil" accept="image/*" className="hidden" onChange={(e) => handleUploadFoto(e, 'foto_profil')} disabled={uploadingTipe === 'foto_profil'} />
           </div>
           
           <h2 className="text-3xl lg:text-4xl font-black uppercase tracking-tight relative z-10">{displayName || 'Tanpa Nama'}</h2>
@@ -535,7 +545,14 @@ export default function KPMDetail({
             <div className="space-y-6 animate-in slide-in-from-bottom-2">
               <div className="bg-indigo-50 border border-indigo-100 p-6 rounded-3xl flex items-start gap-4 mb-4 shadow-sm">
                 <Cloud className="w-7 h-7 text-indigo-600 shrink-0" />
-                <p className="text-sm text-indigo-900 font-bold leading-relaxed">Penyimpanan Terintegrasi: Google Drive.<br/><span className="text-xs font-medium opacity-80 mt-1 inline-block">ID Folder Drive Anda: {extractIdFromUrl(currentUserData?.userDriveLink) || 'Belum diatur.'}</span></p>
+                <p className="text-sm text-indigo-900 font-bold leading-relaxed">
+                  Penyimpanan Terintegrasi: Google Drive.<br/>
+                  {/* PERBAIKAN: Teks Indikator Deteksi ID Drive */}
+                  <span className="text-xs font-medium opacity-80 mt-2 block bg-indigo-100 p-2 rounded-lg border border-indigo-200">
+                     <b>Tautan Disimpan:</b> {currentUserData?.userDriveLink || 'Belum diatur.'}<br/>
+                     <b>ID Folder Terbaca:</b> {extractIdFromUrl(currentUserData?.userDriveLink) || 'GAGAL MEMBACA ID. Cek kembali tautan Drive Anda!'}
+                  </span>
+                </p>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
@@ -554,7 +571,8 @@ export default function KPMDetail({
                         <div className="w-full h-48 bg-slate-50 border-2 border-dashed border-slate-200 rounded-3xl mb-5 flex flex-col items-center justify-center text-slate-300 group-hover:border-blue-200 transition-colors"><ImageIcon className="w-10 h-10 mb-2 opacity-30" /><span className="text-[10px] font-black uppercase tracking-tight">Belum Ada Data Foto</span></div>
                       )}
                       <div className="relative w-full">
-                        <input type="file" id={`file-${item.key}`} accept="image/*" capture="environment" className="hidden" onChange={(e) => handleUploadFoto(e, item.key)} disabled={isLoad} />
+                        {/* PERBAIKAN: Menghapus atribut capture="environment" untuk membolehkan upload dari HP Galeri */}
+                        <input type="file" id={`file-${item.key}`} accept="image/*" className="hidden" onChange={(e) => handleUploadFoto(e, item.key)} disabled={isLoad} />
                         <button onClick={() => document.getElementById(`file-${item.key}`).click()} disabled={isLoad} className={`w-full py-4 rounded-2xl text-[11px] font-black uppercase tracking-widest transition-all shadow-sm flex items-center justify-center ${isLoad ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-slate-100 hover:bg-blue-600 hover:text-white text-slate-700'}`}>
                           {isLoad ? <Loader2 className="w-4 h-4 mr-2 animate-spin"/> : <UploadCloud className="w-4 h-4 mr-2"/>}{isLoad ? 'Mengunggah...' : (fotoUrl ? 'Ganti Foto' : 'Ambil Foto')}
                         </button>
