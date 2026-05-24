@@ -27,15 +27,6 @@ export default function KPMDetail({
   const [famForm, setFamForm] = useState({});
   const [compForm, setCompForm] = useState({});
 
-  const [isMounting, setIsMounting] = useState(true);
-  const [isSavingLocal, setIsSavingLocal] = useState(false);
-
-  React.useEffect(() => {
-    setIsMounting(true);
-    const timer = setTimeout(() => setIsMounting(false), 400);
-    return () => clearTimeout(timer);
-  }, [selectedKPM?.id]);
-
   const extractIdFromUrl = (url) => {
     if (!url) return '';
     const cleanUrl = String(url).trim();
@@ -51,7 +42,6 @@ export default function KPMDetail({
     
     if (String(url).includes('google')) {
       const id = extractIdFromUrl(url);
-      // PERBAIKAN: Menambahkan endpoint thumbnail Drive yang valid untuk render gambar bebas blokir
       return id ? `https://drive.google.com/thumbnail?id=${id}&sz=w1000` : url;
     }
     return url;
@@ -176,18 +166,16 @@ export default function KPMDetail({
     if(!file) return;
 
     const masterGasUrl = aturanPiket?.masterGasUrl;
-    let folderId = extractIdFromUrl(currentUserData?.userDriveLink);
-    if (!folderId || folderId.length < 10) {
-      folderId = extractIdFromUrl(aturanPiket?.masterDriveId);
-    }
+    let folderId = extractIdFromUrl(currentUserData?.userDriveLink) || extractIdFromUrl(aturanPiket?.masterDriveId);
 
     if(!masterGasUrl || !folderId) {
-      showToast(`Gagal! Cek Pengaturan. GAS: ${masterGasUrl ? 'Ada' : 'KOSONG'}, Drive ID: ${folderId ? 'Ada' : 'KOSONG'}`);
+      showToast(`Gagal! Tautan GAS atau Drive tidak ditemukan. Cek Pengaturan!`);
       return;
     }
 
     setUploadingTipe(tipeFoto);
     
+    // Tampilkan gambar seketika (Optimistic UI)
     if (file.type.startsWith('image/')) {
        const tempLocalUrl = URL.createObjectURL(file);
        setSelectedKPM(prev => ({ ...prev, [tipeFoto]: tempLocalUrl }));
@@ -198,7 +186,6 @@ export default function KPMDetail({
       let finalMimeType = file.type;
 
       if (file.type.startsWith('image/')) {
-        showToast("Memproses gambar (Background)...");
         base64Data = await compressImageFast(file);
         finalMimeType = 'image/jpeg';
       } else {
@@ -231,7 +218,6 @@ export default function KPMDetail({
         subFolder: mappingFolder[tipeFoto] || 'Lain-lain'
       };
 
-      // PERBAIKAN: Menjaga fetch bersih dan aman untuk GAS
       const res = await fetch(masterGasUrl, { 
         method: 'POST', 
         headers: { "Content-Type": "text/plain;charset=utf-8" },
@@ -240,30 +226,27 @@ export default function KPMDetail({
       
       const result = await res.json();
       
-      if(result.status === 'success' || result.url) {
-        // PERBAIKAN PENTING: Wajib gunakan directUrl agar terbaca sebagai gambar, bukan webpage
-        const finalUrl = result.directUrl || result.url || result.data;
+      if(result.status === 'success' || result.directUrl) {
+        // Ambil link Direct agar Realtime muncul tanpa block
+        const finalUrl = result.directUrl || result.url;
         const dbNode = selectedKPM.bansos_type === 'PKH' ? 'kpmPkhData' : selectedKPM.bansos_type === 'Sembako' ? 'kpmSembakoData' : 'kpmData';
         
-        await dbUpdate(dbNode, selectedKPM.id, { [tipeFoto]: finalUrl });
+        // Simpan background ke db
+        dbUpdate(dbNode, selectedKPM.id, { [tipeFoto]: finalUrl }).catch(()=> showToast("Gagal sinkron DB"));
         
+        // Update local state instan
         setSelectedKPM(prev => ({ ...prev, [tipeFoto]: finalUrl }));
-        showToast(`✅ ${itemLabelText(tipeFoto)} berhasil tersimpan di Cloud!`);
+        showToast(`✅ Foto tersimpan!`);
       } else {
-        showToast("Error Script Drive: " + (result.error || "Gagal upload"));
+        showToast("Eror Script: " + (result.error || "Gagal"));
       }
     } catch (err) { 
-      showToast("Eror Koneksi. Pastikan Link Drive & Mesin GAS benar."); 
+      showToast("Gagal unggah. Cek koneksi Anda."); 
     } finally { 
       setUploadingTipe(null); 
       e.target.value = null; 
     }
   };
-
-  const itemLabelText = (key) => {
-    const map = daftarFoto.find(d => d.key === key);
-    return map ? map.label : 'File';
-  }
 
   const handleOpenEditModal = () => {
     setEditForm({
@@ -285,18 +268,19 @@ export default function KPMDetail({
     setIsEditModalOpen(true);
   };
 
-  const handleSaveEdit = async (e) => {
+  // ZERO LOADING: Simpan dan ubah UI langsung
+  const handleSaveEdit = (e) => {
     e.preventDefault();
-    setIsSavingLocal(true); 
-    try {
-      const dbNode = selectedKPM.bansos_type === 'PKH' ? 'kpmPkhData' : selectedKPM.bansos_type === 'Sembako' ? 'kpmSembakoData' : 'kpmData';
-      await dbUpdate(dbNode, selectedKPM.id, editForm);
-      Object.keys(editForm).forEach(k => { selectedKPM[k] = editForm[k]; });
+    const dbNode = selectedKPM.bansos_type === 'PKH' ? 'kpmPkhData' : selectedKPM.bansos_type === 'Sembako' ? 'kpmSembakoData' : 'kpmData';
+    
+    // Update State Seketika
+    setSelectedKPM(prev => ({...prev, ...editForm}));
+    setIsEditModalOpen(false);
+    
+    // Background update (Realtime Firebase)
+    dbUpdate(dbNode, selectedKPM.id, editForm).then(() => {
       showToast('Profil KPM berhasil diperbarui!');
-      setIsEditModalOpen(false);
-    } finally {
-      setIsSavingLocal(false); 
-    }
+    }).catch(()=> showToast('Gagal sinkron, cek koneksi.'));
   };
 
   const handleOpenFamModal = () => {
@@ -304,34 +288,34 @@ export default function KPMDetail({
     setIsFamModalOpen(true);
   };
 
-  const handleSaveFamily = async (e) => {
+  const handleSaveFamily = (e) => {
     e.preventDefault();
-    setIsSavingLocal(true); 
-    try {
-      const currentFam = Array.isArray(selectedKPM.keluarga) ? [...selectedKPM.keluarga] : [];
-      currentFam.push(famForm);
-      const dbNode = selectedKPM.bansos_type === 'PKH' ? 'kpmPkhData' : selectedKPM.bansos_type === 'Sembako' ? 'kpmSembakoData' : 'kpmData';
-      await dbUpdate(dbNode, selectedKPM.id, { keluarga: currentFam });
-      setSelectedKPM({...selectedKPM, keluarga: currentFam});
-      showToast("Anggota Keluarga berhasil ditambahkan!");
-      setIsFamModalOpen(false);
-    } finally {
-      setIsSavingLocal(false); 
-    }
+    const currentFam = Array.isArray(selectedKPM.keluarga) ? [...selectedKPM.keluarga] : [];
+    currentFam.push(famForm);
+    const dbNode = selectedKPM.bansos_type === 'PKH' ? 'kpmPkhData' : selectedKPM.bansos_type === 'Sembako' ? 'kpmSembakoData' : 'kpmData';
+    
+    // Update State Seketika
+    setSelectedKPM({...selectedKPM, keluarga: currentFam});
+    setIsFamModalOpen(false);
+    
+    // Background Update
+    dbUpdate(dbNode, selectedKPM.id, { keluarga: currentFam }).then(() => {
+      showToast("Anggota Keluarga ditambahkan!");
+    });
   };
 
-  const handleDeleteFamily = async (famId) => {
+  const handleDeleteFamily = (famId) => {
     if(!window.confirm('Hapus anggota keluarga ini?')) return;
-    setIsSavingLocal(true); 
-    try {
-      const currentFam = selectedKPM.keluarga.filter(k => k.id !== famId && k.nama !== famId);
-      const dbNode = selectedKPM.bansos_type === 'PKH' ? 'kpmPkhData' : selectedKPM.bansos_type === 'Sembako' ? 'kpmSembakoData' : 'kpmData';
-      await dbUpdate(dbNode, selectedKPM.id, { keluarga: currentFam });
-      setSelectedKPM({...selectedKPM, keluarga: currentFam});
+    const currentFam = selectedKPM.keluarga.filter(k => k.id !== famId && k.nama !== famId);
+    const dbNode = selectedKPM.bansos_type === 'PKH' ? 'kpmPkhData' : selectedKPM.bansos_type === 'Sembako' ? 'kpmSembakoData' : 'kpmData';
+    
+    // Update State Seketika
+    setSelectedKPM({...selectedKPM, keluarga: currentFam});
+    
+    // Background Update
+    dbUpdate(dbNode, selectedKPM.id, { keluarga: currentFam }).then(() => {
       showToast("Anggota dihapus.");
-    } finally {
-      setIsSavingLocal(false); 
-    }
+    });
   };
 
   const handleOpenCompModal = () => {
@@ -339,98 +323,72 @@ export default function KPMDetail({
     setIsCompModalOpen(true);
   };
 
-  const handleSaveComponent = async (e) => {
+  const handleSaveComponent = (e) => {
     e.preventDefault();
-    setIsSavingLocal(true); 
-    try {
-      const currentComp = Array.isArray(selectedKPM.komponen_detail) ? [...selectedKPM.komponen_detail] : [];
-      currentComp.push(compForm);
-      const dbNode = selectedKPM.bansos_type === 'PKH' ? 'kpmPkhData' : selectedKPM.bansos_type === 'Sembako' ? 'kpmSembakoData' : 'kpmData';
-      await dbUpdate(dbNode, selectedKPM.id, { komponen_detail: currentComp });
-      setSelectedKPM({...selectedKPM, komponen_detail: currentComp});
-      showToast("Data Komponen berhasil ditambahkan!");
-      setIsCompModalOpen(false);
-    } finally {
-      setIsSavingLocal(false); 
-    }
+    const currentComp = Array.isArray(selectedKPM.komponen_detail) ? [...selectedKPM.komponen_detail] : [];
+    currentComp.push(compForm);
+    const dbNode = selectedKPM.bansos_type === 'PKH' ? 'kpmPkhData' : selectedKPM.bansos_type === 'Sembako' ? 'kpmSembakoData' : 'kpmData';
+    
+    // Update State Seketika
+    setSelectedKPM({...selectedKPM, komponen_detail: currentComp});
+    setIsCompModalOpen(false);
+
+    // Background Update
+    dbUpdate(dbNode, selectedKPM.id, { komponen_detail: currentComp }).then(() => {
+      showToast("Data Komponen ditambahkan!");
+    });
   };
 
-  const handleDeleteComponent = async (compId) => {
+  const handleDeleteComponent = (compId) => {
     if(!window.confirm('Hapus data komponen ini?')) return;
-    setIsSavingLocal(true); 
-    try {
-      const currentComp = selectedKPM.komponen_detail.filter(c => c.id !== compId);
-      const dbNode = selectedKPM.bansos_type === 'PKH' ? 'kpmPkhData' : selectedKPM.bansos_type === 'Sembako' ? 'kpmSembakoData' : 'kpmData';
-      await dbUpdate(dbNode, selectedKPM.id, { komponen_detail: currentComp });
-      setSelectedKPM({...selectedKPM, komponen_detail: currentComp});
+    const currentComp = selectedKPM.komponen_detail.filter(c => c.id !== compId);
+    const dbNode = selectedKPM.bansos_type === 'PKH' ? 'kpmPkhData' : selectedKPM.bansos_type === 'Sembako' ? 'kpmSembakoData' : 'kpmData';
+    
+    // Update State Seketika
+    setSelectedKPM({...selectedKPM, komponen_detail: currentComp});
+
+    // Background Update
+    dbUpdate(dbNode, selectedKPM.id, { komponen_detail: currentComp }).then(() => {
       showToast("Komponen dihapus.");
-    } finally {
-      setIsSavingLocal(false); 
-    }
+    });
   };
 
-  const handleSaveGraduasi = async (e) => {
+  const handleSaveGraduasi = (e) => {
     e.preventDefault();
-    setIsSavingLocal(true); 
-    try {
-      const alasan = e.target.alasan.value;
-      const kategoriStatus = e.target.kategori_status.value;
-      
-      let newType = '';
-      if (kategoriStatus.includes('Potensial')) {
-         newType = 'potensial';
-      } else if (kategoriStatus.includes('Graduasi')) {
-         newType = 'graduasi';
-      } else {
-         newType = 'utama'; 
-      }
-
-      const finalStatus = `${kategoriStatus} - ${alasan}`;
-      const dbNode = selectedKPM.bansos_type === 'PKH' ? 'kpmPkhData' : selectedKPM.bansos_type === 'Sembako' ? 'kpmSembakoData' : 'kpmData';
-      
-      await dbUpdate(dbNode, selectedKPM.id, { 
-        type: newType, 
-        status: finalStatus,
-        potensi: newType === 'potensial' ? alasan : (selectedKPM.potensi || '')
-      });
-      
-      setSelectedKPM({
-        ...selectedKPM, 
-        type: newType, 
-        status: finalStatus,
-        potensi: newType === 'potensial' ? alasan : (selectedKPM.potensi || '')
-      });
-      
-      showToast('Pembaruan Status KPM berhasil disimpan!');
-    } finally {
-      setIsSavingLocal(false); 
+    const alasan = e.target.alasan.value;
+    const kategoriStatus = e.target.kategori_status.value;
+    
+    let newType = '';
+    if (kategoriStatus.includes('Potensial')) {
+       newType = 'potensial';
+    } else if (kategoriStatus.includes('Graduasi')) {
+       newType = 'graduasi';
+    } else {
+       newType = 'utama'; 
     }
+
+    const finalStatus = `${kategoriStatus} - ${alasan}`;
+    const dbNode = selectedKPM.bansos_type === 'PKH' ? 'kpmPkhData' : selectedKPM.bansos_type === 'Sembako' ? 'kpmSembakoData' : 'kpmData';
+    
+    const payload = { 
+      type: newType, 
+      status: finalStatus,
+      potensi: newType === 'potensial' ? alasan : (selectedKPM.potensi || '')
+    };
+
+    // Update State Seketika
+    setSelectedKPM({...selectedKPM, ...payload});
+
+    // Background Update
+    dbUpdate(dbNode, selectedKPM.id, payload).then(() => {
+      showToast('Status KPM berhasil diperbarui!');
+    });
   };
 
   const safeValRender = (val) => val ? String(val) : '-';
 
-  if (isMounting) {
-    return (
-      <div className="flex flex-col items-center justify-center py-40 w-full animate-in fade-in duration-300">
-         <RefreshCw className="w-12 h-12 text-blue-500 animate-spin mb-4 shadow-sm rounded-full" />
-         <p className="text-slate-500 font-black uppercase tracking-widest text-sm animate-pulse">Menyiapkan Data Profil KPM...</p>
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-6 animate-in fade-in pb-10 max-w-5xl mx-auto relative">
-      
-      {isSavingLocal && (
-        <div className="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-slate-900/60 backdrop-blur-sm transition-all">
-          <div className="bg-white p-8 rounded-[2rem] flex flex-col items-center shadow-2xl animate-in zoom-in-95">
-            <RefreshCw className="w-12 h-12 text-blue-600 animate-spin mb-4" />
-            <p className="text-slate-800 font-black tracking-widest uppercase text-sm">Menyimpan Perubahan...</p>
-          </div>
-        </div>
-      )}
-
-      {/* PERBAIKAN: Penambahan type="button" agar tidak me-refresh */}
       <div className="flex flex-col sm:flex-row gap-3">
         <button type="button" onClick={() => setSelectedKPM(null)} className="flex items-center justify-center text-slate-600 font-black text-sm bg-white border border-slate-200 px-6 py-3.5 rounded-2xl shadow-sm transition-all hover:-translate-x-1">
           <ChevronLeft className="w-5 h-5 mr-1" /> Kembali
@@ -443,7 +401,6 @@ export default function KPMDetail({
         </button>
       </div>
       
-      {/* PERBAIKAN: Penambahan type="button" */}
       <div className="flex bg-white rounded-2xl p-2 shadow-sm border border-slate-200 overflow-x-auto scrollbar-hide">
         <button type="button" onClick={() => setKpmDetailTab('profil')} className={`flex-shrink-0 px-6 py-3.5 text-sm font-black rounded-xl transition-all ${kpmDetailTab === 'profil' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}>Profil & Keluarga</button>
         <button type="button" onClick={() => setKpmDetailTab('komponen')} className={`flex-shrink-0 px-6 py-3.5 text-sm font-black rounded-xl transition-all ${kpmDetailTab === 'komponen' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}>Data Komponen Anak/Lansia</button>
@@ -609,8 +566,7 @@ export default function KPMDetail({
                 <p className="text-sm text-indigo-900 font-bold leading-relaxed">
                   Penyimpanan Terintegrasi: Google Drive.<br/>
                   <span className="text-xs font-medium opacity-80 mt-2 block bg-indigo-100 p-2 rounded-lg border border-indigo-200">
-                     <b>Tautan Disimpan:</b> {currentUserData?.userDriveLink || aturanPiket?.masterDriveId || 'Belum diatur.'}<br/>
-                     <b>ID Folder Terbaca:</b> {extractIdFromUrl(currentUserData?.userDriveLink) || extractIdFromUrl(aturanPiket?.masterDriveId) || 'GAGAL MEMBACA ID. Cek kembali tautan Drive Anda!'}
+                     <b>ID Folder Terbaca:</b> {extractIdFromUrl(currentUserData?.userDriveLink) || extractIdFromUrl(aturanPiket?.masterDriveId) || 'GAGAL MEMBACA ID. Cek Pengaturan!'}
                   </span>
                 </p>
               </div>
@@ -643,7 +599,6 @@ export default function KPMDetail({
                       
                       <div className="flex gap-2 w-full mt-auto">
                         <input type="file" id={`cam-${item.key}`} accept="image/*" capture="environment" className="hidden" onChange={(e) => handleUploadFoto(e, item.key)} disabled={isLoad} />
-                        {/* PERBAIKAN: type="button" mutlak untuk cegah reload form */}
                         <button 
                           type="button"
                           onClick={() => document.getElementById(`cam-${item.key}`).click()} 
