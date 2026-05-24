@@ -51,6 +51,7 @@ export default function Pengaturan(props) {
     });
   };
 
+  // ZERO LOADING: Background Update Profil
   const handleUploadFotoProfil = async (e) => {
     const file = e.target.files[0];
     if(!file) return;
@@ -76,7 +77,6 @@ export default function Pengaturan(props) {
         subFolder: 'Foto Profil SDM'
       };
 
-      // PERBAIKAN: Dibuat seperti di KPMDetail.jsx dengan text/plain agar sangat handal tanpa preflight ngawur
       const res = await fetch(masterGasUrl, { 
         method: 'POST',
         headers: { "Content-Type": "text/plain;charset=utf-8" },
@@ -84,39 +84,44 @@ export default function Pengaturan(props) {
       });
       const result = await res.json();
       
-      if(result.status === 'success' || result.url) {
-        // PERBAIKAN: Wajib simpan directUrl agar foto profil muncul di aplikasi
-        const finalUrl = result.directUrl || result.url || result.data;
-        await dbUpdate('sdmData', currentUserData.id, { foto_profil: finalUrl });
-        showToast(`Selesai! Foto profil berhasil diganti dan tersimpan di Google Drive Pusat.`);
+      if(result.status === 'success' || result.directUrl) {
+        const finalUrl = result.directUrl || result.url;
+        // Background DB Update
+        dbUpdate('sdmData', currentUserData.id, { foto_profil: finalUrl }).then(() => {
+          showToast(`Selesai! Foto profil berhasil disimpan di Google Drive.`);
+        });
       } else {
         showToast("Error Script: " + (result.error || "Gagal upload"));
       }
     } catch (err) { 
-      showToast("Eror Koneksi. Pastikan Link Drive & Mesin GAS benar."); 
+      showToast("Gagal unggah. Cek koneksi Anda."); 
     } finally { 
       setUploadingFoto(false); 
       e.target.value = null;
     }
   };
 
-  const handleSaveProfile = async (e) => {
+  const handleSaveProfile = (e) => {
     e.preventDefault();
     if (currentUserData && currentUserData.id) {
-       await dbUpdate('sdmData', currentUserData.id, { 
+       // ZERO LOADING: Langsung hajar DB tanpa layar loading
+       dbUpdate('sdmData', currentUserData.id, { 
          nama: userName,
          password: userPassword,
          userDriveLink: userDriveLink 
+       }).then(() => {
+         showToast("Profil Login & Tautan Drive Berhasil Disimpan!");
        });
-       showToast("Profil Login & Tautan Drive Berhasil Disimpan!");
     }
   };
 
-  const handleSaveAdminSistem = async (e) => {
+  const handleSaveAdminSistem = (e) => {
     e.preventDefault();
     if(setAturanPiket) {
-       await dbUpdate('aturanPiket', 'global', aturanPiket);
-       showToast("Pengaturan Sistem Pusat Berhasil Diperbarui!");
+       // ZERO LOADING: Simpan konfigurasi Server
+       dbUpdate('aturanPiket', 'global', aturanPiket).then(() => {
+         showToast("Pengaturan Sistem Pusat Berhasil Diperbarui!");
+       });
     }
   };
 
@@ -124,7 +129,6 @@ export default function Pengaturan(props) {
     <div className="max-w-5xl mx-auto space-y-6 animate-in fade-in pb-10">
       
       <div className="flex bg-white rounded-2xl p-2 shadow-sm border border-slate-200 overflow-x-auto scrollbar-hide">
-        {/* PERBAIKAN: Menambahkan type="button" */}
         <button 
           type="button"
           onClick={() => setSettingTab('profil')} 
