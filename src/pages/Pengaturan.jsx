@@ -15,18 +15,11 @@ export default function Pengaturan(props) {
     dbUpdate 
   } = props;
   
-  // =========================================================================
-  // STATES UNTUK PROFIL USER
-  // =========================================================================
   const [userName, setUserName] = useState(currentUserData?.nama || '');
   const [userPassword, setUserPassword] = useState(currentUserData?.password || '');
-  // TAMBAHAN BLUEPRINT: State untuk menyimpan Link Google Drive pribadi pendamping
   const [userDriveLink, setUserDriveLink] = useState(currentUserData?.userDriveLink || '');
   const [uploadingFoto, setUploadingFoto] = useState(false);
 
-  // =========================================================================
-  // FUNGSI KOMPRESI GAMBAR (Max 800px, Kualitas 0.6)
-  // =========================================================================
   const compressImage = (file) => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -58,9 +51,6 @@ export default function Pengaturan(props) {
     });
   };
 
-  // =========================================================================
-  // FUNGSI UPLOAD FOTO PROFIL KE GOOGLE DRIVE PUSAT
-  // =========================================================================
   const handleUploadFotoProfil = async (e) => {
     const file = e.target.files[0];
     if(!file) return;
@@ -86,11 +76,18 @@ export default function Pengaturan(props) {
         subFolder: 'Foto Profil SDM'
       };
 
-      const res = await fetch(masterGasUrl, { method: 'POST', mode: 'cors', body: JSON.stringify(payload) });
+      // PERBAIKAN: Dibuat seperti di KPMDetail.jsx dengan text/plain agar sangat handal tanpa preflight ngawur
+      const res = await fetch(masterGasUrl, { 
+        method: 'POST',
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify(payload) 
+      });
       const result = await res.json();
       
-      if(result.url) {
-        await dbUpdate('sdmData', currentUserData.id, { foto_profil: result.url });
+      if(result.status === 'success' || result.url) {
+        // PERBAIKAN: Wajib simpan directUrl agar foto profil muncul di aplikasi
+        const finalUrl = result.directUrl || result.url || result.data;
+        await dbUpdate('sdmData', currentUserData.id, { foto_profil: finalUrl });
         showToast(`Selesai! Foto profil berhasil diganti dan tersimpan di Google Drive Pusat.`);
       } else {
         showToast("Error Script: " + (result.error || "Gagal upload"));
@@ -103,16 +100,13 @@ export default function Pengaturan(props) {
     }
   };
 
-  // =========================================================================
-  // FUNGSI SIMPAN PROFIL & SISTEM ADMIN
-  // =========================================================================
   const handleSaveProfile = async (e) => {
     e.preventDefault();
     if (currentUserData && currentUserData.id) {
        await dbUpdate('sdmData', currentUserData.id, { 
          nama: userName,
          password: userPassword,
-         userDriveLink: userDriveLink // TAMBAHAN BLUEPRINT: Menyimpan Link Folder ke Database
+         userDriveLink: userDriveLink 
        });
        showToast("Profil Login & Tautan Drive Berhasil Disimpan!");
     }
@@ -121,7 +115,6 @@ export default function Pengaturan(props) {
   const handleSaveAdminSistem = async (e) => {
     e.preventDefault();
     if(setAturanPiket) {
-       // Menyimpan ke Firebase Realtime di node global 'aturanPiket'
        await dbUpdate('aturanPiket', 'global', aturanPiket);
        showToast("Pengaturan Sistem Pusat Berhasil Diperbarui!");
     }
@@ -130,11 +123,10 @@ export default function Pengaturan(props) {
   return (
     <div className="max-w-5xl mx-auto space-y-6 animate-in fade-in pb-10">
       
-      {/* ------------------------------------------------------------- */}
-      {/* TABS NAVIGATION */}
-      {/* ------------------------------------------------------------- */}
       <div className="flex bg-white rounded-2xl p-2 shadow-sm border border-slate-200 overflow-x-auto scrollbar-hide">
+        {/* PERBAIKAN: Menambahkan type="button" */}
         <button 
+          type="button"
           onClick={() => setSettingTab('profil')} 
           className={`flex-shrink-0 px-8 py-3.5 text-sm font-black rounded-xl cursor-pointer transition-all ${settingTab === 'profil' ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/30' : 'text-slate-500 hover:bg-slate-50'}`}
         >
@@ -142,6 +134,7 @@ export default function Pengaturan(props) {
         </button>
         {isKorkab && (
           <button 
+            type="button"
             onClick={() => setSettingTab('sistem')} 
             className={`flex-shrink-0 px-8 py-3.5 text-sm font-black rounded-xl cursor-pointer transition-all ${settingTab === 'sistem' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/30' : 'text-slate-500 hover:bg-slate-50'}`}
           >
@@ -150,9 +143,6 @@ export default function Pengaturan(props) {
         )}
       </div>
 
-      {/* ------------------------------------------------------------- */}
-      {/* TAB 1: PENGATURAN PROFIL USER */}
-      {/* ------------------------------------------------------------- */}
       {settingTab === 'profil' && (
         <div className="bg-white rounded-[2rem] shadow-sm border border-slate-100 overflow-hidden animate-in zoom-in-95">
           
@@ -235,9 +225,6 @@ export default function Pengaturan(props) {
                   />
                 </div>
 
-                {/* ========================================================================= */}
-                {/* TAMBAHAN BLUEPRINT: Kolom Input Tautan Drive Pribadi Pendamping */}
-                {/* ========================================================================= */}
                 <div>
                   <label className="block text-[11px] font-black text-slate-500 uppercase tracking-widest mb-3 ml-1 transition-colors">
                     Tautan / Link Folder Google Drive Anda
@@ -269,9 +256,6 @@ export default function Pengaturan(props) {
         </div>
       )}
 
-      {/* ------------------------------------------------------------- */}
-      {/* TAB 2: PENGATURAN SISTEM (KHUSUS ADMIN/KORKAB) */}
-      {/* ------------------------------------------------------------- */}
       {settingTab === 'sistem' && isKorkab && (
         <div className="bg-white rounded-[2rem] shadow-sm border border-slate-100 p-8 lg:p-10 animate-in zoom-in-95">
            <div className="flex items-center mb-8 border-b border-slate-100 pb-6">
@@ -283,8 +267,6 @@ export default function Pengaturan(props) {
            </div>
            
            <form onSubmit={handleSaveAdminSistem} className="space-y-6">
-             
-             {/* KOTAK PENGATURAN LINK DRIVE PUSAT & GAS */}
              <div className="bg-indigo-50 p-7 rounded-[2.5rem] border border-indigo-100 shadow-sm space-y-6">
                 <h4 className="font-black text-indigo-800 text-sm uppercase tracking-widest flex items-center border-b border-indigo-200/50 pb-3">
                   <Cloud className="w-5 h-5 mr-2"/> Konfigurasi Google Drive Pusat
@@ -329,7 +311,6 @@ export default function Pengaturan(props) {
                 <p className="text-[10px] text-indigo-500 font-bold mt-3 italic">*Semua foto dan dokumen dari seluruh SDM akan dikumpulkan menjadi satu dan disusun rapi per folder otomatis di dalam ID Folder Google Drive Pusat di atas.</p>
              </div>
              
-             {/* KOTAK PENGATURAN JAM PIKET */}
              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pt-4">
                <div>
                  <label className="block text-[11px] font-black text-slate-500 mb-2 uppercase tracking-widest ml-1">Jam Mulai Piket</label>
@@ -341,7 +322,6 @@ export default function Pengaturan(props) {
                </div>
              </div>
 
-             {/* KOTAK DENDA */}
              <div className="bg-red-50 p-6 rounded-2xl border border-red-100 shadow-sm mt-4">
                <h4 className="font-black text-red-800 mb-4 text-xs uppercase tracking-widest flex items-center"><AlertCircle className="w-4 h-4 mr-2"/> Nominal Denda Keterlambatan (Rp)</h4>
                <input type="number" value={aturanPiket?.denda} onChange={(e) => setAturanPiket({...aturanPiket, denda: parseInt(e.target.value)})} className="w-full p-5 border border-red-200 rounded-xl font-black focus:border-red-400 focus:ring-4 focus:ring-red-100 outline-none text-red-700 bg-white text-lg transition-all"/>
