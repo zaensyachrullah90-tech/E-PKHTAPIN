@@ -271,11 +271,16 @@ export default function App() {
 
           const result = await response.json();
           
+          // =========================================================================
+          // PERBAIKAN TUNTAS: Thumbnail API
+          // =========================================================================
           if (result.status === 'success' || result.directUrl || result.url) {
             setIsSaving(false);
             showToast("Foto berhasil diamankan ke Google Drive!");
-            // MENGGUNAKAN DIRECT URL AGAR FOTO BISA DITAMPILKAN DI APLIKASI
-            resolve(result.directUrl || result.url || result.fileUrl); 
+            const finalLink = result.fileId 
+              ? `https://drive.google.com/thumbnail?id=${result.fileId}&sz=w1000` 
+              : (result.directUrl || result.url || result.fileUrl);
+            resolve(finalLink); 
           } else {
             setIsSaving(false);
             showToast("Gagal mengunggah ke Drive: " + (result.error || result.message));
@@ -957,7 +962,7 @@ export default function App() {
   // FIX LOADING TERUS: Menambahkan paksaan clear setIsSaving di fungsi ganti menu
   // ====================================================================
   const goToMenu = (m, s = null) => { 
-    setIsSaving(false); // <---- INI ADALAH PENYELAMAT LOADING NYANGKUT
+    setIsSaving(false); 
     setActiveTab(m);
     if (s) { 
       if (m === 'agenda') { 
