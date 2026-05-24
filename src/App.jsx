@@ -5,7 +5,8 @@ import {
   Menu, X, LogOut, CheckCircle, Shield, AlertCircle, RefreshCw, 
   Download, Database, UploadCloud, Plus, Calendar, Edit, Link as LinkIcon,
   Home, BookOpen, Users, ClipboardList, ClipboardCheck, 
-  MessageSquare, FileText, Trophy, Map as MapIcon, Settings, ExternalLink, Target, WifiOff
+  MessageSquare, FileText, Trophy, Map as MapIcon, Settings, ExternalLink, Target, WifiOff,
+  Camera, Image as ImageIcon, Upload // <-- INJEKSI ICON BARU
 } from 'lucide-react';
 
 // --- IMPORT CONFIG & UTILS ---
@@ -34,9 +35,6 @@ import Ranking from './pages/Ranking';
 import Peta from './pages/Peta';
 import AplikasiLainnya from './pages/AplikasiLainnya';
 import MasterDataManagement from './components/MasterDataManagement';
-
-// --- KONFIGURASI GOOGLE APPS SCRIPT URL ---
-const GLOBAL_GAS_URL = "https://script.google.com/macros/s/AKfycbyiOjCIEeFZAMF4HBZn6SSJP5qFsHcLOIIu-ndIBrGKUtoAchJBIm1rTxH75NmGA2Nd/exec";
 
 // --- DEFAULT DATA SEEDS ---
 const defaultSdm = [
@@ -144,6 +142,10 @@ export default function App() {
   const [customHeaderVal, setCustomHeaderVal] = useState('');
   const [filterDesaMaps, setFilterDesaMaps] = useState('Semua');
 
+  // --- STATE INJEKSI UPLOAD DRIVE ---
+  const [showDriveUploadModal, setShowDriveUploadModal] = useState(false);
+  const [isUploadingDrive, setIsUploadingDrive] = useState(false);
+
   // ====================================================================
   // DATA COLLECTIONS
   // ====================================================================
@@ -221,59 +223,6 @@ export default function App() {
   const showToast = (msg) => { 
     setToastMessage(String(msg)); 
     setTimeout(() => setToastMessage(null), 4000); 
-  };
-
-  // ====================================================================
-  // ENGINE UPLOAD GOOGLE DRIVE (GAS INTEGRATION)
-  // ====================================================================
-  const uploadToGoogleDrive = async (file, folderName = 'Dokumentasi_PKH_Tapin') => {
-    return new Promise((resolve, reject) => {
-      if (!file) return reject(new Error("Tidak ada file yang dipilih."));
-      
-      setIsSaving(true);
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = async () => {
-        try {
-          const base64Data = reader.result.split(',')[1];
-          const payload = {
-            fileName: file.name,
-            mimeType: file.type,
-            data: base64Data,
-            folderName: folderName
-          };
-
-          const response = await fetch(GLOBAL_GAS_URL, {
-            method: 'POST',
-            body: JSON.stringify(payload),
-            headers: {
-               // Text/plain menghindari block pre-flight CORS di GAS
-               "Content-Type": "text/plain;charset=utf-8",
-            }
-          });
-
-          const result = await response.json();
-          if (result.status === 'success') {
-            setIsSaving(false);
-            showToast("Foto berhasil diamankan ke Google Drive!");
-            resolve(result.fileUrl);
-          } else {
-            setIsSaving(false);
-            showToast("Gagal mengunggah ke Drive: " + result.message);
-            reject(new Error(result.message || "Upload gagal"));
-          }
-        } catch (err) {
-          setIsSaving(false);
-          showToast("Koneksi ke Google Drive terputus.");
-          reject(err);
-        }
-      };
-      reader.onerror = (error) => {
-        setIsSaving(false);
-        showToast("Gagal membaca file foto.");
-        reject(error);
-      };
-    });
   };
 
   // ====================================================================
@@ -977,6 +926,111 @@ export default function App() {
   };
 
   // ====================================================================
+  // INJEKSI FUNGSI UPLOAD GOOGLE DRIVE (SERVICE ACCOUNT TANPA GAS)
+  // ====================================================================
+  const getGoogleAccessToken = async () => {
+    // ⚠️ AWAS: Memasukkan private key di sini akan terekspos di sisi klien.
+    // Pastikan Service Account ini HANYA punya akses spesifik (bukan owner project)
+    const sa = {
+      "client_email": "sistem-pkh-tapin@pkh-uploader.iam.gserviceaccount.com",
+      "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQCpVul/HlmkQPxZ\nLY+/8nb/Uf9Z9vNOd/kOIY6SfKbyjZWSOvSye9pPgA7NXoTKe3ahmU/dR1j59nlN\no5tg1y5fvyVhbmjTDIpZv4y6XILnU26oB7nNG3afPn5gtyYM0WRnkQahvTed/B/L\nmsNaO5i9v3vUe3HTJVfUZ7jeouCyxkLSNnjpJhKhvhvZvPXLZzGwLAC1wmQSVRUI\npOl8jW10kWfI2OWwu14ROfjKP6dMV5ArLym4CgIuCk5HEETD20oc+C+lMmG/a/w0\nvwXlxIslwpMwfSySgSKD0HQL2TmmoK5KJNAvcyj/zp2N7fB0Ce6/1gqYPwwSfALF\n5Bkg3EtjAgMBAAECggEAGZGZdQu4nk//qllyTJnINPoFE+jxSOZdkTAo7l5q+NG/\nBVLokrCXwIxF7+V3KHmm6nSTNgapXSjFnR74fZFQG73pX4JDyqYol6+QCK2iSFp1\nKWLtP5aHfTj67RCKasINJoQj27UN2klw5ZXLLGs2P2RTxrwS7j5DujslE1zFj8iX\n7Zukr3g8iV+Zj5k9a6032aAHz1X/0qTqCs/w5oRI6JA5vqwRK0uz4aY4yc/TzmN3\n567K2gMWbuu6m4f1lxz6BDGc8pP3YgL0btJZJeXTChN0m1ebWVYGaJf+7Ch982G6\nEzuyWS/euA5tIPg/gNc6cubZHsktbP8HF6XjAvPCBQKBgQDY4ISWqOeI70veFJ+6\nrGgddZagutvsJrynfPVLk94Ej3IbCNZ2LqyRXPpqhmccPDEwgsSc88mQ0abLOfIM\n+BTqefkJKw3BOTLjEu68tr14+lFLU2fQReFhDQ4dvVexP/Jq9lVqYgy1qCP2vtfn\nweXIz0gYibyw8gcO/rswmOtwdQKBgQDH4xbV0TyVoiT34Eh/pA6THS9YDeTfkO05\n4HAMQo3RrIBla4jmmxCX0OWhy9fhZlfAp6KO6z1q2rJMoFGN9I7JrMJnL9UuI59W\n1rEZlr4XpNOIFDvF505cfSbN4BtDt/XzajhC0NKGv0K5wvtgEhacSwqP+o4y+LVQ\nvQ7W/r5RdwKBgE9lIiTlgJ2ovOV4N2FnbFYcjiAZSBmTtMy7+jDI2SZiPSuYeKqb\nO6GboDEPMwArKPbRaJjsxoW1upH7jJki2MVeEcVBda+e+PoYHD4JyCNZwBkLV53v\ndyrIVLqeblP9TQnLVEm1y2FVRJU4GGJHoY96ErKo+eLtN5hNuMl5sfdhAoGAXBtJ\nb3d+Gllf/ZSs85wuVx3wrfuhBl/q4GuKVivo28BIXfOiXtj/WWWaGucqcCPPtefJ\nIWBGqdFiraqGSgpyLX5dCl1hN2SUzNgbPXZX299I1gC01mnSkw3cbquhBKBlRigh\nCrDdAdhqL90oJknPf2+Yy2WiVtyB+FVV3D4AhtsCgYBiYe522k17kK4cQVc3TmXL\nxvXSiJ5FDjaSwXvnItIVMnmD5bnxsdnhVSbQ7m0q0Jrez/qqA7ZU65/RjLQHjV0C\n9vD7a1LeiKnbP76p+hkpAyfB6RpDx0alUQOhdRLBVpGiPbKsj8zFsoSsDnZ/B3ip\npf49Wlc75Icg4Amu36B68g==\n-----END PRIVATE KEY-----\n"
+    };
+
+    const header = { alg: 'RS256', typ: 'JWT' };
+    const now = Math.floor(Date.now() / 1000);
+    const claim = {
+      iss: sa.client_email,
+      scope: 'https://www.googleapis.com/auth/drive.file',
+      aud: 'https://oauth2.googleapis.com/token',
+      exp: now + 3600,
+      iat: now,
+    };
+
+    const b64Encode = (obj) => btoa(JSON.stringify(obj)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    const textToSign = `${b64Encode(header)}.${b64Encode(claim)}`;
+
+    const pemHeader = "-----BEGIN PRIVATE KEY-----";
+    const pemFooter = "-----END PRIVATE KEY-----";
+    const pemContents = sa.private_key.substring(
+      sa.private_key.indexOf(pemHeader) + pemHeader.length,
+      sa.private_key.indexOf(pemFooter)
+    ).replace(/\s/g, '');
+
+    const binaryDerString = window.atob(pemContents);
+    const binaryDer = new Uint8Array(binaryDerString.length);
+    for (let i = 0; i < binaryDerString.length; i++) {
+      binaryDer[i] = binaryDerString.charCodeAt(i);
+    }
+
+    const key = await window.crypto.subtle.importKey(
+      'pkcs8',
+      binaryDer.buffer,
+      { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+      false,
+      ['sign']
+    );
+
+    const signature = await window.crypto.subtle.sign(
+      'RSASSA-PKCS1-v1_5',
+      key,
+      new TextEncoder().encode(textToSign)
+    );
+
+    const signatureB64 = btoa(String.fromCharCode(...new Uint8Array(signature))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    const jwt = `${textToSign}.${signatureB64}`;
+
+    const res = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: `grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${jwt}`
+    });
+    
+    if (!res.ok) throw new Error("Gagal mengambil Google Token.");
+    const data = await res.json();
+    return data.access_token;
+  };
+
+  const handleFileUploadToDrive = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    setIsUploadingDrive(true);
+    setShowDriveUploadModal(false);
+    showToast(`Mulai Upload File: ${file.name} ...`);
+
+    try {
+      const accessToken = await getGoogleAccessToken();
+      const metadata = {
+        name: file.name,
+        mimeType: file.type,
+      };
+
+      const form = new FormData();
+      form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+      form.append('file', file);
+
+      const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`
+        },
+        body: form
+      });
+
+      if (res.ok) {
+        showToast("Berhasil! File telah tersimpan di Google Drive.");
+      } else {
+        throw new Error("Gagal upload file ke Drive.");
+      }
+    } catch (err) {
+      showToast(`Upload Error: ${err.message}`);
+    } finally {
+      setIsUploadingDrive(false);
+    }
+  };
+
+
+  // ====================================================================
   // MAIN RENDER (UI)
   // ====================================================================
   if (isInitializing) {
@@ -1071,7 +1125,6 @@ export default function App() {
                 safeTasksData={safeTasksDataToPass} 
                 safeVotesData={safeVotesDataToPass} 
                 goToMenu={goToMenu} 
-                uploadToGoogleDrive={uploadToGoogleDrive}
               />
             )}
 
@@ -1085,7 +1138,6 @@ export default function App() {
                 dbDelete={dbDelete} 
                 dbAdd={dbAdd} 
                 showToast={showToast} 
-                uploadToGoogleDrive={uploadToGoogleDrive}
               />
             )}
 
@@ -1112,7 +1164,6 @@ export default function App() {
                 currentUserData={currentUserData} 
                 activeSdmList={activeSdmList} 
                 aturanPiket={aturanPiket} 
-                uploadToGoogleDrive={uploadToGoogleDrive}
               />
             )}
 
@@ -1128,7 +1179,6 @@ export default function App() {
                 dbUpdate={dbUpdate} 
                 currentUserData={currentUserData} 
                 aturanPiket={aturanPiket} 
-                uploadToGoogleDrive={uploadToGoogleDrive}
               />
             )}
 
@@ -1159,7 +1209,6 @@ export default function App() {
                 setSelectedVote={setSelectedVote} 
                 setShowTambahJadwalModal={setShowTambahJadwalModal} 
                 setShowIsiJadwalModal={setShowIsiJadwalModal} 
-                uploadToGoogleDrive={uploadToGoogleDrive}
               />
             )}
 
@@ -1170,7 +1219,6 @@ export default function App() {
                 setShowPengaduanModal={setShowPengaduanModal} 
                 setSelectedPengaduan={setSelectedPengaduan} 
                 setShowTindakLanjutModal={setShowTindakLanjutModal} 
-                uploadToGoogleDrive={uploadToGoogleDrive}
               />
             )} 
 
@@ -1182,7 +1230,6 @@ export default function App() {
                 currentUserData={currentUserData} 
                 aturanPiket={aturanPiket} 
                 showToast={showToast} 
-                uploadToGoogleDrive={uploadToGoogleDrive}
               />
             )}
 
@@ -1260,11 +1307,58 @@ export default function App() {
         </div>
       )}
       
-      {isSaving && (
+      {(isSaving || isUploadingDrive) && (
         <div className="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-slate-900/80 backdrop-blur-xl transition-all">
           <div className="bg-white/10 p-10 rounded-[2.5rem] border border-white/10 flex flex-col items-center shadow-2xl relative overflow-hidden">
             <RefreshCw className="w-12 h-12 text-blue-400 animate-spin mb-4" />
-            <p className="text-white font-black tracking-widest uppercase text-sm">Menyimpan Data...</p>
+            <p className="text-white font-black tracking-widest uppercase text-sm">
+              {isUploadingDrive ? "Mengunggah File..." : "Menyimpan Data..."}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* INJEKSI: TOMBOL FLOATING ACTION BUTTON (FAB) UPLOAD DRIVE (GLOBAL) */}
+      {/* ========================================================================= */}
+      <button 
+        onClick={() => setShowDriveUploadModal(true)}
+        className="fixed bottom-6 right-6 lg:bottom-10 lg:right-10 bg-blue-600 text-white p-4 rounded-full shadow-2xl hover:bg-blue-700 hover:scale-110 transition-all z-50 group flex items-center gap-0 hover:gap-3 hover:px-6"
+      >
+        <Upload className="w-6 h-6" />
+        <span className="w-0 overflow-hidden group-hover:w-auto font-bold whitespace-nowrap text-sm">Upload File</span>
+      </button>
+
+      {/* ========================================================================= */}
+      {/* INJEKSI: MODAL UPLOAD DRIVE */}
+      {/* ========================================================================= */}
+      {showDriveUploadModal && (
+        <div className="fixed inset-0 z-[600] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-900/70 backdrop-blur-sm transition-opacity" onClick={() => setShowDriveUploadModal(false)}></div>
+          <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-md relative z-10 p-8 animate-in zoom-in-95 text-center">
+            <h3 className="font-black text-2xl mb-6 text-slate-800">Upload Dokumen/Laporan</h3>
+            <p className="text-sm text-slate-500 mb-8 font-medium">File akan langsung tersimpan ke penyimpanan Google Drive PKH Tapin.</p>
+            
+            <div className="grid grid-cols-2 gap-4">
+               {/* OPSI KAMERA LANGSUNG */}
+               <label className="flex flex-col items-center justify-center p-6 bg-blue-50 border-2 border-blue-100 rounded-2xl cursor-pointer hover:bg-blue-100 transition-all hover:scale-[1.02]">
+                  <Camera className="w-10 h-10 text-blue-600 mb-3" />
+                  <span className="font-bold text-slate-800 text-sm">Kamera<br/>Langsung</span>
+                  {/* capture="environment" akan memaksa HP membuka kamera belakang */}
+                  <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handleFileUploadToDrive} />
+               </label>
+               
+               {/* OPSI GALERI */}
+               <label className="flex flex-col items-center justify-center p-6 bg-emerald-50 border-2 border-emerald-100 rounded-2xl cursor-pointer hover:bg-emerald-100 transition-all hover:scale-[1.02]">
+                  <ImageIcon className="w-10 h-10 text-emerald-600 mb-3" />
+                  <span className="font-bold text-slate-800 text-sm">Ambil dari<br/>Galeri</span>
+                  <input type="file" accept="*/*" className="hidden" onChange={handleFileUploadToDrive} />
+               </label>
+            </div>
+            
+            <button onClick={() => setShowDriveUploadModal(false)} className="mt-8 w-full py-4 bg-slate-100 text-slate-600 rounded-xl font-bold cursor-pointer hover:bg-slate-200 transition-colors">
+              Batal
+            </button>
           </div>
         </div>
       )}
