@@ -4,7 +4,7 @@ import {
   Briefcase, Users as UsersIcon, GraduationCap, Stethoscope, 
   Database, Info, UploadCloud, Image as ImageIcon, Loader2, 
   Edit, Save, X, CheckCircle, Award, Cloud, PlusCircle, Trash2,
-  HeartPulse, BookOpen, Activity, Camera, RefreshCw 
+  HeartPulse, BookOpen, Activity, Camera
 } from 'lucide-react';
 
 export default function KPMDetail({
@@ -27,6 +27,9 @@ export default function KPMDetail({
   const [famForm, setFamForm] = useState({});
   const [compForm, setCompForm] = useState({});
 
+  // =========================================================================
+  // HELPER EXTRACTION BACA LINK ATAU ID LANGSUNG
+  // =========================================================================
   const extractIdFromUrl = (url) => {
     if (!url) return '';
     const cleanUrl = String(url).trim();
@@ -34,17 +37,6 @@ export default function KPMDetail({
     if (match && match[1]) return match[1];
     const matchFallback = cleanUrl.match(/^[-\w]{25,}$/);
     return matchFallback ? matchFallback[0] : cleanUrl;
-  };
-
-  const getDriveImageUrl = (url) => {
-    if (!url) return '';
-    if (String(url).startsWith('blob:')) return url;
-    
-    if (String(url).includes('google')) {
-      const id = extractIdFromUrl(url);
-      return id ? `https://drive.google.com/thumbnail?id=${id}&sz=w1000` : url;
-    }
-    return url;
   };
 
   const getVal = (obj, targetType) => {
@@ -130,34 +122,33 @@ export default function KPMDetail({
     { key: 'foto_fisik_kks', label: 'Fisik Kartu KKS' }
   ];
 
-  const compressImageFast = (fileToCompress) => {
-    return new Promise((resolve) => {
+  const compressImage = (file) => {
+    return new Promise((resolve, reject) => {
       const reader = new FileReader();
-      reader.readAsDataURL(fileToCompress);
+      reader.readAsDataURL(file);
       reader.onload = (event) => {
         const img = new Image();
         img.src = event.target.result;
         img.onload = () => {
           const canvas = document.createElement('canvas');
-          const MAX_WIDTH = 1000;
-          const MAX_HEIGHT = 1000;
           let width = img.width;
           let height = img.height;
-
+          const maxDim = 1024;
           if (width > height) {
-            if (width > MAX_WIDTH) { height = Math.round(height * MAX_WIDTH / width); width = MAX_WIDTH; }
+            if (width > maxDim) { height *= maxDim / width; width = maxDim; }
           } else {
-            if (height > MAX_HEIGHT) { width = Math.round(width * MAX_HEIGHT / height); height = MAX_HEIGHT; }
+            if (height > maxDim) { width *= maxDim / height; height = maxDim; }
           }
           canvas.width = width;
           canvas.height = height;
           const ctx = canvas.getContext('2d');
           ctx.drawImage(img, 0, 0, width, height);
-          
-          const fullBase64 = canvas.toDataURL('image/jpeg', 0.8);
-          resolve(fullBase64.split(',')[1]);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
+          resolve(dataUrl.split(',')[1]); 
         };
+        img.onerror = (err) => reject(err);
       };
+      reader.onerror = (error) => reject(error);
     });
   };
 
@@ -166,27 +157,29 @@ export default function KPMDetail({
     if(!file) return;
 
     const masterGasUrl = aturanPiket?.masterGasUrl;
-    let folderId = extractIdFromUrl(currentUserData?.userDriveLink) || extractIdFromUrl(aturanPiket?.masterDriveId);
+    
+    // =========================================================================
+    // FIX KOSONG: Fallback Otomatis ke Master Drive ID
+    // =========================================================================
+    let folderId = extractIdFromUrl(currentUserData?.userDriveLink);
+    if (!folderId || folderId.length < 10) {
+      folderId = extractIdFromUrl(aturanPiket?.masterDriveId);
+    }
 
     if(!masterGasUrl || !folderId) {
-      showToast(`Gagal! Tautan GAS atau Drive tidak ditemukan. Cek Pengaturan!`);
+      showToast(`Gagal! Cek Pengaturan. GAS: ${masterGasUrl ? 'Ada' : 'KOSONG'}, Drive ID: ${folderId ? 'Ada' : 'KOSONG'}`);
       return;
     }
 
     setUploadingTipe(tipeFoto);
     
-    // Tampilkan gambar seketika (Optimistic UI)
-    if (file.type.startsWith('image/')) {
-       const tempLocalUrl = URL.createObjectURL(file);
-       setSelectedKPM(prev => ({ ...prev, [tipeFoto]: tempLocalUrl }));
-    }
-
     try {
       let base64Data = "";
       let finalMimeType = file.type;
 
       if (file.type.startsWith('image/')) {
-        base64Data = await compressImageFast(file);
+        showToast("Memproses gambar...");
+        base64Data = await compressImage(file);
         finalMimeType = 'image/jpeg';
       } else {
         base64Data = await new Promise((resolve, reject) => {
@@ -220,31 +213,31 @@ export default function KPMDetail({
 
       const res = await fetch(masterGasUrl, { 
         method: 'POST', 
-        headers: { "Content-Type": "text/plain;charset=utf-8" },
-        body: JSON.stringify(payload)
+        headers: {
+          "Content-Type": "text/plain;charset=utf-8",
+        },
+        body: JSON.stringify(payload) 
       });
       
       const result = await res.json();
       
-      if(result.status === 'success' || result.directUrl) {
-        // Ambil link Direct agar Realtime muncul tanpa block
-        const finalUrl = result.directUrl || result.url;
+      // =========================================================================
+      // PERBAIKAN FATAL: Menangkap result.directUrl (Link Mentahan Gambar)
+      // =========================================================================
+      if(result.status === 'success' || result.directUrl || result.url) {
+        const finalImageLink = result.directUrl || result.url; // PAKAI DIRECT URL
         const dbNode = selectedKPM.bansos_type === 'PKH' ? 'kpmPkhData' : selectedKPM.bansos_type === 'Sembako' ? 'kpmSembakoData' : 'kpmData';
-        
-        // Simpan background ke db
-        dbUpdate(dbNode, selectedKPM.id, { [tipeFoto]: finalUrl }).catch(()=> showToast("Gagal sinkron DB"));
-        
-        // Update local state instan
-        setSelectedKPM(prev => ({ ...prev, [tipeFoto]: finalUrl }));
-        showToast(`✅ Foto tersimpan!`);
+        await dbUpdate(dbNode, selectedKPM.id, { [tipeFoto]: finalImageLink });
+        selectedKPM[tipeFoto] = finalImageLink;
+        showToast(`Selesai! Foto berhasil tersimpan di Drive dan tampil di Sistem.`);
       } else {
-        showToast("Eror Script: " + (result.error || "Gagal"));
+        showToast("Error Script Drive: " + (result.error || "Gagal upload"));
       }
     } catch (err) { 
-      showToast("Gagal unggah. Cek koneksi Anda."); 
+      showToast("Eror Koneksi. Pastikan Link Drive & Mesin GAS benar."); 
     } finally { 
       setUploadingTipe(null); 
-      e.target.value = null; 
+      e.target.value = null;
     }
   };
 
@@ -268,19 +261,13 @@ export default function KPMDetail({
     setIsEditModalOpen(true);
   };
 
-  // ZERO LOADING: Simpan dan ubah UI langsung
-  const handleSaveEdit = (e) => {
+  const handleSaveEdit = async (e) => {
     e.preventDefault();
     const dbNode = selectedKPM.bansos_type === 'PKH' ? 'kpmPkhData' : selectedKPM.bansos_type === 'Sembako' ? 'kpmSembakoData' : 'kpmData';
-    
-    // Update State Seketika
-    setSelectedKPM(prev => ({...prev, ...editForm}));
+    await dbUpdate(dbNode, selectedKPM.id, editForm);
+    Object.keys(editForm).forEach(k => { selectedKPM[k] = editForm[k]; });
+    showToast('Profil KPM berhasil diperbarui!');
     setIsEditModalOpen(false);
-    
-    // Background update (Realtime Firebase)
-    dbUpdate(dbNode, selectedKPM.id, editForm).then(() => {
-      showToast('Profil KPM berhasil diperbarui!');
-    }).catch(()=> showToast('Gagal sinkron, cek koneksi.'));
   };
 
   const handleOpenFamModal = () => {
@@ -288,34 +275,24 @@ export default function KPMDetail({
     setIsFamModalOpen(true);
   };
 
-  const handleSaveFamily = (e) => {
+  const handleSaveFamily = async (e) => {
     e.preventDefault();
     const currentFam = Array.isArray(selectedKPM.keluarga) ? [...selectedKPM.keluarga] : [];
     currentFam.push(famForm);
     const dbNode = selectedKPM.bansos_type === 'PKH' ? 'kpmPkhData' : selectedKPM.bansos_type === 'Sembako' ? 'kpmSembakoData' : 'kpmData';
-    
-    // Update State Seketika
+    await dbUpdate(dbNode, selectedKPM.id, { keluarga: currentFam });
     setSelectedKPM({...selectedKPM, keluarga: currentFam});
+    showToast("Anggota Keluarga berhasil ditambahkan!");
     setIsFamModalOpen(false);
-    
-    // Background Update
-    dbUpdate(dbNode, selectedKPM.id, { keluarga: currentFam }).then(() => {
-      showToast("Anggota Keluarga ditambahkan!");
-    });
   };
 
-  const handleDeleteFamily = (famId) => {
+  const handleDeleteFamily = async (famId) => {
     if(!window.confirm('Hapus anggota keluarga ini?')) return;
     const currentFam = selectedKPM.keluarga.filter(k => k.id !== famId && k.nama !== famId);
     const dbNode = selectedKPM.bansos_type === 'PKH' ? 'kpmPkhData' : selectedKPM.bansos_type === 'Sembako' ? 'kpmSembakoData' : 'kpmData';
-    
-    // Update State Seketika
+    await dbUpdate(dbNode, selectedKPM.id, { keluarga: currentFam });
     setSelectedKPM({...selectedKPM, keluarga: currentFam});
-    
-    // Background Update
-    dbUpdate(dbNode, selectedKPM.id, { keluarga: currentFam }).then(() => {
-      showToast("Anggota dihapus.");
-    });
+    showToast("Anggota dihapus.");
   };
 
   const handleOpenCompModal = () => {
@@ -323,37 +300,27 @@ export default function KPMDetail({
     setIsCompModalOpen(true);
   };
 
-  const handleSaveComponent = (e) => {
+  const handleSaveComponent = async (e) => {
     e.preventDefault();
     const currentComp = Array.isArray(selectedKPM.komponen_detail) ? [...selectedKPM.komponen_detail] : [];
     currentComp.push(compForm);
     const dbNode = selectedKPM.bansos_type === 'PKH' ? 'kpmPkhData' : selectedKPM.bansos_type === 'Sembako' ? 'kpmSembakoData' : 'kpmData';
-    
-    // Update State Seketika
+    await dbUpdate(dbNode, selectedKPM.id, { komponen_detail: currentComp });
     setSelectedKPM({...selectedKPM, komponen_detail: currentComp});
+    showToast("Data Komponen berhasil ditambahkan!");
     setIsCompModalOpen(false);
-
-    // Background Update
-    dbUpdate(dbNode, selectedKPM.id, { komponen_detail: currentComp }).then(() => {
-      showToast("Data Komponen ditambahkan!");
-    });
   };
 
-  const handleDeleteComponent = (compId) => {
+  const handleDeleteComponent = async (compId) => {
     if(!window.confirm('Hapus data komponen ini?')) return;
     const currentComp = selectedKPM.komponen_detail.filter(c => c.id !== compId);
     const dbNode = selectedKPM.bansos_type === 'PKH' ? 'kpmPkhData' : selectedKPM.bansos_type === 'Sembako' ? 'kpmSembakoData' : 'kpmData';
-    
-    // Update State Seketika
+    await dbUpdate(dbNode, selectedKPM.id, { komponen_detail: currentComp });
     setSelectedKPM({...selectedKPM, komponen_detail: currentComp});
-
-    // Background Update
-    dbUpdate(dbNode, selectedKPM.id, { komponen_detail: currentComp }).then(() => {
-      showToast("Komponen dihapus.");
-    });
+    showToast("Komponen dihapus.");
   };
 
-  const handleSaveGraduasi = (e) => {
+  const handleSaveGraduasi = async (e) => {
     e.preventDefault();
     const alasan = e.target.alasan.value;
     const kategoriStatus = e.target.kategori_status.value;
@@ -370,51 +337,52 @@ export default function KPMDetail({
     const finalStatus = `${kategoriStatus} - ${alasan}`;
     const dbNode = selectedKPM.bansos_type === 'PKH' ? 'kpmPkhData' : selectedKPM.bansos_type === 'Sembako' ? 'kpmSembakoData' : 'kpmData';
     
-    const payload = { 
+    await dbUpdate(dbNode, selectedKPM.id, { 
       type: newType, 
       status: finalStatus,
       potensi: newType === 'potensial' ? alasan : (selectedKPM.potensi || '')
-    };
-
-    // Update State Seketika
-    setSelectedKPM({...selectedKPM, ...payload});
-
-    // Background Update
-    dbUpdate(dbNode, selectedKPM.id, payload).then(() => {
-      showToast('Status KPM berhasil diperbarui!');
     });
+    
+    setSelectedKPM({
+      ...selectedKPM, 
+      type: newType, 
+      status: finalStatus,
+      potensi: newType === 'potensial' ? alasan : (selectedKPM.potensi || '')
+    });
+    
+    showToast('Pembaruan Status KPM berhasil disimpan!');
   };
 
   const safeValRender = (val) => val ? String(val) : '-';
+  const inputModalClass = "w-full p-4 border border-slate-200 rounded-2xl focus:border-blue-500 focus:ring-4 focus:ring-blue-100 outline-none text-sm font-bold text-slate-700 bg-slate-50 focus:bg-white transition-all";
 
   return (
-    <div className="space-y-6 animate-in fade-in pb-10 max-w-5xl mx-auto relative">
+    <div className="space-y-6 animate-in fade-in pb-10 max-w-5xl mx-auto">
       <div className="flex flex-col sm:flex-row gap-3">
-        <button type="button" onClick={() => setSelectedKPM(null)} className="flex items-center justify-center text-slate-600 font-black text-sm bg-white border border-slate-200 px-6 py-3.5 rounded-2xl shadow-sm transition-all hover:-translate-x-1">
+        <button onClick={() => setSelectedKPM(null)} className="flex items-center justify-center text-slate-600 font-black text-sm bg-white border border-slate-200 px-6 py-3.5 rounded-2xl shadow-sm transition-all hover:-translate-x-1">
           <ChevronLeft className="w-5 h-5 mr-1" /> Kembali
         </button>
-        <button type="button" onClick={handleOpenEditModal} className="flex-1 flex items-center justify-center text-blue-700 font-black text-sm bg-blue-50 border border-blue-200 px-6 py-3.5 rounded-2xl shadow-sm transition-all hover:-translate-y-0.5 hover:bg-blue-100">
+        <button onClick={handleOpenEditModal} className="flex-1 flex items-center justify-center text-blue-700 font-black text-sm bg-blue-50 border border-blue-200 px-6 py-3.5 rounded-2xl shadow-sm transition-all hover:-translate-y-0.5 hover:bg-blue-100">
           <Edit className="w-5 h-5 mr-2" /> Edit Profil KPM
         </button>
-        <button type="button" onClick={() => showToast("Mendownload Profil PDF...")} className="flex-1 text-white font-black text-sm bg-blue-600 px-6 py-3.5 rounded-2xl shadow-lg shadow-blue-500/30 flex items-center justify-center transition-all hover:-translate-y-0.5 hover:bg-blue-700">
+        <button onClick={() => showToast("Mendownload Profil PDF...")} className="flex-1 text-white font-black text-sm bg-blue-600 px-6 py-3.5 rounded-2xl shadow-lg shadow-blue-500/30 flex items-center justify-center transition-all hover:-translate-y-0.5 hover:bg-blue-700">
           <Printer className="w-5 h-5 mr-2" /> Cetak Biodata Lengkap
         </button>
       </div>
       
       <div className="flex bg-white rounded-2xl p-2 shadow-sm border border-slate-200 overflow-x-auto scrollbar-hide">
-        <button type="button" onClick={() => setKpmDetailTab('profil')} className={`flex-shrink-0 px-6 py-3.5 text-sm font-black rounded-xl transition-all ${kpmDetailTab === 'profil' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}>Profil & Keluarga</button>
-        <button type="button" onClick={() => setKpmDetailTab('komponen')} className={`flex-shrink-0 px-6 py-3.5 text-sm font-black rounded-xl transition-all ${kpmDetailTab === 'komponen' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}>Data Komponen Anak/Lansia</button>
-        <button type="button" onClick={() => setKpmDetailTab('dokumen')} className={`flex-shrink-0 px-6 py-3.5 text-sm font-black rounded-xl transition-all ${kpmDetailTab === 'dokumen' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}>Upload Dokumen Foto</button>
-        <button type="button" onClick={() => setKpmDetailTab('graduasi')} className={`flex-shrink-0 px-6 py-3.5 text-sm font-black rounded-xl transition-all ${kpmDetailTab === 'graduasi' ? 'bg-orange-600 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}>Status & Berkas Khusus</button>
+        <button onClick={() => setKpmDetailTab('profil')} className={`flex-shrink-0 px-6 py-3.5 text-sm font-black rounded-xl transition-all ${kpmDetailTab === 'profil' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}>Profil & Keluarga</button>
+        <button onClick={() => setKpmDetailTab('komponen')} className={`flex-shrink-0 px-6 py-3.5 text-sm font-black rounded-xl transition-all ${kpmDetailTab === 'komponen' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}>Data Komponen Anak/Lansia</button>
+        <button onClick={() => setKpmDetailTab('dokumen')} className={`flex-shrink-0 px-6 py-3.5 text-sm font-black rounded-xl transition-all ${kpmDetailTab === 'dokumen' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}>Upload Dokumen Foto</button>
+        <button onClick={() => setKpmDetailTab('graduasi')} className={`flex-shrink-0 px-6 py-3.5 text-sm font-black rounded-xl transition-all ${kpmDetailTab === 'graduasi' ? 'bg-orange-600 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}>Status & Berkas Khusus</button>
       </div>
 
       <div className="bg-white rounded-[2.5rem] shadow-sm border border-slate-200 overflow-hidden">
         <div className="bg-gradient-to-br from-blue-700 via-blue-900 to-slate-900 p-12 text-center text-white relative overflow-hidden">
           <div className="absolute top-0 right-0 w-80 h-80 bg-white opacity-5 rounded-full blur-[100px]"></div>
-          
           <div className="relative mx-auto w-32 h-32 mb-6 group relative z-10">
             {selectedKPM.foto_profil ? (
-              <img src={getDriveImageUrl(selectedKPM.foto_profil)} alt="Profil KPM" className="w-full h-full object-cover rounded-[2rem] border-4 border-white/20 shadow-2xl" />
+              <img src={selectedKPM.foto_profil} alt="Profil KPM" className="w-full h-full object-cover rounded-[2rem] border-4 border-white/20 shadow-2xl" />
             ) : (
               <UserSquare className="w-full h-full p-6 bg-white/10 backdrop-blur-md rounded-[2rem] text-white border border-white/20 shadow-2xl" />
             )}
@@ -467,13 +435,13 @@ export default function KPMDetail({
               <div className="pt-6">
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
                   <h3 className="font-black text-slate-800 flex items-center text-xl"><UsersIcon className="w-6 h-6 mr-3 text-blue-600"/> Data Anggota Keluarga</h3>
-                  <button type="button" onClick={handleOpenFamModal} className="px-5 py-3 bg-blue-50 text-blue-700 rounded-xl font-black text-xs uppercase tracking-widest hover:bg-blue-600 hover:text-white transition-all flex items-center border border-blue-200"><PlusCircle className="w-4 h-4 mr-2"/> Tambah Anggota</button>
+                  <button onClick={handleOpenFamModal} className="px-5 py-3 bg-blue-50 text-blue-700 rounded-xl font-black text-xs uppercase tracking-widest hover:bg-blue-600 hover:text-white transition-all flex items-center border border-blue-200"><PlusCircle className="w-4 h-4 mr-2"/> Tambah Anggota</button>
                 </div>
                 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {Array.isArray(selectedKPM?.keluarga) && selectedKPM.keluarga.length > 0 ? selectedKPM.keluarga.map((k, i) => (
                     <div key={k.id || i} className="bg-white p-6 border border-slate-200 rounded-3xl shadow-sm relative group">
-                      <button type="button" onClick={() => handleDeleteFamily(k.id || k.nama)} className="absolute top-4 right-4 p-2 bg-red-50 text-red-500 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-red-500 hover:text-white transition-all"><Trash2 className="w-4 h-4" /></button>
+                      <button onClick={() => handleDeleteFamily(k.id || k.nama)} className="absolute top-4 right-4 p-2 bg-red-50 text-red-500 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-red-500 hover:text-white transition-all"><Trash2 className="w-4 h-4" /></button>
                       <h4 className="font-black text-slate-800 text-lg uppercase pr-10">{String(k.nama || '')}</h4>
                       <p className="text-xs font-bold text-blue-600 bg-blue-50 border border-blue-100 px-3 py-1.5 rounded-lg w-fit mt-2 mb-4 uppercase tracking-widest">{k.hubungan || 'Anggota'} {k.umur ? `• ${k.umur} Thn` : ''}</p>
                       <div className="space-y-2 text-xs font-bold text-slate-600">
@@ -496,13 +464,13 @@ export default function KPMDetail({
               <div>
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4 border-b border-slate-100 pb-5">
                   <h3 className="font-black text-slate-800 flex items-center text-xl tracking-tight"><Activity className="w-6 h-6 mr-3 text-indigo-600"/> Rincian Komponen Bantuan</h3>
-                  <button type="button" onClick={handleOpenCompModal} className="px-5 py-3 bg-indigo-50 text-indigo-700 rounded-xl font-black text-xs uppercase tracking-widest hover:bg-indigo-600 hover:text-white transition-all flex items-center border border-indigo-200"><PlusCircle className="w-4 h-4 mr-2"/> Tambah Komponen</button>
+                  <button onClick={handleOpenCompModal} className="px-5 py-3 bg-indigo-50 text-indigo-700 rounded-xl font-black text-xs uppercase tracking-widest hover:bg-indigo-600 hover:text-white transition-all flex items-center border border-indigo-200"><PlusCircle className="w-4 h-4 mr-2"/> Tambah Komponen</button>
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   {Array.isArray(selectedKPM?.komponen_detail) && selectedKPM.komponen_detail.map((c) => (
                      <div key={c.id} className={`p-6 border rounded-[2rem] shadow-sm relative group transition-colors ${c.kategori === 'Pendidikan' ? 'bg-blue-50/30 border-blue-100 hover:border-blue-300' : c.kategori === 'Kesehatan' ? 'bg-emerald-50/30 border-emerald-100 hover:border-emerald-300' : 'bg-purple-50/30 border-purple-100 hover:border-purple-300'}`}>
-                        <button type="button" onClick={() => handleDeleteComponent(c.id)} className="absolute top-4 right-4 p-2 bg-white text-red-500 rounded-lg shadow-sm opacity-0 group-hover:opacity-100 hover:bg-red-500 hover:text-white transition-all"><Trash2 className="w-4 h-4" /></button>
+                        <button onClick={() => handleDeleteComponent(c.id)} className="absolute top-4 right-4 p-2 bg-white text-red-500 rounded-lg shadow-sm opacity-0 group-hover:opacity-100 hover:bg-red-500 hover:text-white transition-all"><Trash2 className="w-4 h-4" /></button>
                         <div className="flex items-center gap-3 mb-3">
                            {c.kategori === 'Pendidikan' ? <BookOpen className="w-6 h-6 text-blue-500"/> : c.kategori === 'Kesehatan' ? <HeartPulse className="w-6 h-6 text-emerald-500"/> : <Activity className="w-6 h-6 text-purple-500"/>}
                            <span className={`text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-lg border ${c.kategori === 'Pendidikan' ? 'bg-blue-100 text-blue-700 border-blue-200' : c.kategori === 'Kesehatan' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-purple-100 text-purple-700 border-purple-200'}`}>{c.kategori}</span>
@@ -566,56 +534,31 @@ export default function KPMDetail({
                 <p className="text-sm text-indigo-900 font-bold leading-relaxed">
                   Penyimpanan Terintegrasi: Google Drive.<br/>
                   <span className="text-xs font-medium opacity-80 mt-2 block bg-indigo-100 p-2 rounded-lg border border-indigo-200">
-                     <b>ID Folder Terbaca:</b> {extractIdFromUrl(currentUserData?.userDriveLink) || extractIdFromUrl(aturanPiket?.masterDriveId) || 'GAGAL MEMBACA ID. Cek Pengaturan!'}
+                     <b>Tautan Disimpan:</b> {currentUserData?.userDriveLink || aturanPiket?.masterDriveId || 'Belum diatur.'}<br/>
+                     <b>ID Folder Terbaca:</b> {extractIdFromUrl(currentUserData?.userDriveLink) || extractIdFromUrl(aturanPiket?.masterDriveId) || 'GAGAL MEMBACA ID. Cek kembali tautan Drive Anda!'}
                   </span>
                 </p>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                 {daftarFoto.map((item) => {
-                  const fotoUrlDisplay = getDriveImageUrl(selectedKPM[item.key]);
-                  const asliUrl = selectedKPM[item.key];
+                  const fotoUrl = selectedKPM[item.key];
                   const isLoad = uploadingTipe === item.key;
-                  
                   return (
-                    <div key={item.key} className="bg-white border border-slate-200 p-5 rounded-[2rem] shadow-sm flex flex-col justify-between group hover:border-blue-400 transition-all">
-                      <h5 className="font-black text-slate-700 text-[10px] mb-4 uppercase tracking-widest flex items-center line-clamp-1"><ImageIcon className="w-4 h-4 mr-2 text-slate-400 group-hover:text-blue-500 transition-colors flex-shrink-0"/> {item.label}</h5>
-                      
-                      {fotoUrlDisplay ? (
-                        <div className="relative w-full h-40 bg-slate-100 rounded-2xl overflow-hidden mb-4 border border-slate-200">
-                          <img src={fotoUrlDisplay} alt={item.label} className="w-full h-full object-cover" />
-                          <div className="absolute inset-0 bg-slate-900/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center backdrop-blur-sm">
-                            {!String(fotoUrlDisplay).startsWith('blob:') && (
-                              <a href={asliUrl} target="_blank" rel="noreferrer" className="text-[10px] font-black text-white bg-blue-600 px-4 py-2 rounded-xl shadow-lg hover:bg-blue-500">Buka Asli</a>
-                            )}
-                          </div>
+                    <div key={item.key} className="bg-white border border-slate-200 p-6 rounded-[2rem] shadow-sm flex flex-col justify-between group hover:border-blue-400 transition-all">
+                      <h5 className="font-black text-slate-700 text-[11px] mb-4 uppercase tracking-widest flex items-center"><ImageIcon className="w-4 h-4 mr-2 text-slate-400 group-hover:text-blue-500 transition-colors"/> {item.label}</h5>
+                      {fotoUrl ? (
+                        <div className="relative w-full h-48 bg-slate-100 rounded-2xl overflow-hidden mb-5 border border-slate-200">
+                          <img src={fotoUrl} alt={item.label} className="w-full h-full object-cover" />
+                          <div className="absolute inset-0 bg-slate-900/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center backdrop-blur-sm"><a href={fotoUrl} target="_blank" rel="noreferrer" className="text-xs font-black text-white bg-blue-600 px-6 py-3 rounded-xl shadow-lg hover:bg-blue-500">Lihat Asli</a></div>
                         </div>
                       ) : (
-                        <div className="w-full h-40 bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl mb-4 flex flex-col items-center justify-center text-slate-300 group-hover:border-blue-200 transition-colors">
-                          <ImageIcon className="w-8 h-8 mb-2 opacity-30" />
-                          <span className="text-[9px] font-black uppercase tracking-tight text-center px-4">Belum Ada Foto</span>
-                        </div>
+                        <div className="w-full h-48 bg-slate-50 border-2 border-dashed border-slate-200 rounded-3xl mb-5 flex flex-col items-center justify-center text-slate-300 group-hover:border-blue-200 transition-colors"><ImageIcon className="w-10 h-10 mb-2 opacity-30" /><span className="text-[10px] font-black uppercase tracking-tight">Belum Ada Data Foto</span></div>
                       )}
-                      
-                      <div className="flex gap-2 w-full mt-auto">
-                        <input type="file" id={`cam-${item.key}`} accept="image/*" capture="environment" className="hidden" onChange={(e) => handleUploadFoto(e, item.key)} disabled={isLoad} />
-                        <button 
-                          type="button"
-                          onClick={() => document.getElementById(`cam-${item.key}`).click()} 
-                          disabled={isLoad} 
-                          className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-sm flex items-center justify-center border ${isLoad ? 'bg-slate-50 text-slate-400 border-slate-200 cursor-not-allowed' : 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-600 hover:text-white hover:border-blue-600'}`}
-                        >
-                          {isLoad ? <Loader2 className="w-3.5 h-3.5 animate-spin"/> : <Camera className="w-3.5 h-3.5 mr-1.5"/>} {isLoad ? 'Proses...' : 'Kamera'}
-                        </button>
-
-                        <input type="file" id={`gal-${item.key}`} accept="image/*" className="hidden" onChange={(e) => handleUploadFoto(e, item.key)} disabled={isLoad} />
-                        <button 
-                          type="button"
-                          onClick={() => document.getElementById(`gal-${item.key}`).click()} 
-                          disabled={isLoad} 
-                          className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-sm flex items-center justify-center border ${isLoad ? 'bg-slate-50 text-slate-400 border-slate-200 cursor-not-allowed' : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-600 hover:text-white hover:border-emerald-600'}`}
-                        >
-                          {isLoad ? <Loader2 className="w-3.5 h-3.5 animate-spin"/> : <ImageIcon className="w-3.5 h-3.5 mr-1.5"/>} {isLoad ? 'Proses...' : 'Galeri'}
+                      <div className="relative w-full">
+                        <input type="file" id={`file-${item.key}`} accept="image/*" className="hidden" onChange={(e) => handleUploadFoto(e, item.key)} disabled={isLoad} />
+                        <button onClick={() => document.getElementById(`file-${item.key}`).click()} disabled={isLoad} className={`w-full py-4 rounded-2xl text-[11px] font-black uppercase tracking-widest transition-all shadow-sm flex items-center justify-center ${isLoad ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-slate-100 hover:bg-blue-600 hover:text-white text-slate-700'}`}>
+                          {isLoad ? <Loader2 className="w-4 h-4 mr-2 animate-spin"/> : <UploadCloud className="w-4 h-4 mr-2"/>}{isLoad ? 'Mengunggah...' : (fotoUrl ? 'Ganti Foto' : 'Ambil Foto')}
                         </button>
                       </div>
                     </div>
@@ -653,18 +596,10 @@ export default function KPMDetail({
                    ) : ( 
                      <div className="bg-slate-50 border border-dashed border-slate-300 rounded-2xl p-8 text-center mb-6"><p className="text-sm font-bold text-slate-500 italic">File / Berkas foto pernyataan belum diunggah.</p></div>
                    )}
-                   
-                   <div className="flex flex-col sm:flex-row gap-4">
-                     <input type="file" id="cam-berkas_graduasi" accept="image/*" capture="environment" className="hidden" onChange={(e) => handleUploadFoto(e, 'berkas_graduasi')} disabled={uploadingTipe === 'berkas_graduasi'} />
-                     <button type="button" onClick={() => document.getElementById('cam-berkas_graduasi').click()} disabled={uploadingTipe === 'berkas_graduasi'} className="flex-1 py-5 bg-blue-50 text-blue-700 border border-blue-200 rounded-2xl font-black hover:bg-blue-600 hover:text-white flex items-center justify-center transition-all uppercase tracking-widest text-[11px]">
-                       {uploadingTipe === 'berkas_graduasi' ? <Loader2 className="w-5 h-5 mr-2 animate-spin"/> : <Camera className="w-5 h-5 mr-2"/>} {uploadingTipe === 'berkas_graduasi' ? 'Memproses...' : 'Foto Dokumen'}
-                     </button>
-
-                     <input type="file" id="gal-berkas_graduasi" accept="image/*,application/pdf" className="hidden" onChange={(e) => handleUploadFoto(e, 'berkas_graduasi')} disabled={uploadingTipe === 'berkas_graduasi'} />
-                     <button type="button" onClick={() => document.getElementById('gal-berkas_graduasi').click()} disabled={uploadingTipe === 'berkas_graduasi'} className="flex-1 py-5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-2xl font-black hover:bg-indigo-600 hover:text-white flex items-center justify-center transition-all uppercase tracking-widest text-[11px]">
-                       {uploadingTipe === 'berkas_graduasi' ? <Loader2 className="w-5 h-5 mr-2 animate-spin"/> : <UploadCloud className="w-5 h-5 mr-2"/>} {uploadingTipe === 'berkas_graduasi' ? 'Memproses...' : 'Upload dari File/Galeri'}
-                     </button>
-                   </div>
+                   <input type="file" id="file-berkas_graduasi" accept="image/*,application/pdf" className="hidden" onChange={(e) => handleUploadFoto(e, 'berkas_graduasi')} disabled={uploadingTipe === 'berkas_graduasi'} />
+                   <button onClick={() => document.getElementById('file-berkas_graduasi').click()} disabled={uploadingTipe === 'berkas_graduasi'} className="px-10 py-5 w-full md:w-auto justify-center bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-2xl font-black hover:bg-indigo-600 hover:text-white flex items-center transition-all uppercase tracking-widest text-[11px]">
+                     {uploadingTipe === 'berkas_graduasi' ? <Loader2 className="w-5 h-5 mr-2 animate-spin"/> : <UploadCloud className="w-5 h-5 mr-2"/>} {uploadingTipe === 'berkas_graduasi' ? 'Mengunggah Berkas...' : 'Upload Berkas (PDF / Foto)'}
+                   </button>
                 </div>
              </div>
           )}
@@ -677,7 +612,7 @@ export default function KPMDetail({
           <div className="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-2xl relative z-10 p-8 lg:p-10 max-h-[90vh] overflow-y-auto animate-in zoom-in-95 custom-scrollbar">
             <div className="flex justify-between items-center mb-8 border-b border-slate-100 pb-5">
               <h3 className="font-black text-2xl text-slate-800 flex items-center uppercase tracking-tight"><Edit className="w-6 h-6 mr-3 text-blue-600"/> Edit Data KPM</h3>
-              <button type="button" onClick={() => setIsEditModalOpen(false)} className="p-2 bg-slate-100 hover:bg-slate-200 rounded-full transition-colors text-slate-500"><X className="w-6 h-6" /></button>
+              <button onClick={() => setIsEditModalOpen(false)} className="p-2 bg-slate-100 hover:bg-slate-200 rounded-full transition-colors text-slate-500"><X className="w-6 h-6" /></button>
             </div>
             
             <form onSubmit={handleSaveEdit} className="space-y-6">
@@ -717,7 +652,7 @@ export default function KPMDetail({
           <div className="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-xl relative z-10 p-8 lg:p-10 animate-in zoom-in-95">
             <div className="flex justify-between items-center mb-8 border-b border-slate-100 pb-5">
               <h3 className="font-black text-xl text-slate-800 flex items-center uppercase tracking-tight"><UsersIcon className="w-6 h-6 mr-3 text-blue-600"/> Tambah Anggota Keluarga</h3>
-              <button type="button" onClick={() => setIsFamModalOpen(false)} className="p-2 bg-slate-100 hover:bg-slate-200 rounded-full transition-colors text-slate-500"><X className="w-6 h-6" /></button>
+              <button onClick={() => setIsFamModalOpen(false)} className="p-2 bg-slate-100 hover:bg-slate-200 rounded-full transition-colors text-slate-500"><X className="w-6 h-6" /></button>
             </div>
             <form onSubmit={handleSaveFamily} className="space-y-5">
               <div><label className="block text-[11px] font-black text-slate-400 mb-2 uppercase tracking-widest">Nama Lengkap</label><input type="text" required value={famForm.nama} onChange={(e) => setFamForm({...famForm, nama: e.target.value})} className="w-full p-4 border border-slate-200 rounded-2xl focus:border-blue-500 outline-none text-sm font-bold text-slate-700 bg-slate-50 focus:bg-white" /></div>
@@ -747,7 +682,7 @@ export default function KPMDetail({
           <div className="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-2xl relative z-10 p-8 lg:p-10 max-h-[90vh] overflow-y-auto animate-in zoom-in-95 custom-scrollbar">
             <div className="flex justify-between items-center mb-8 border-b border-slate-100 pb-5">
               <h3 className="font-black text-2xl text-slate-800 flex items-center uppercase tracking-tight"><Activity className="w-6 h-6 mr-3 text-indigo-600"/> Tambah Komponen Bantuan</h3>
-              <button type="button" onClick={() => setIsCompModalOpen(false)} className="p-2 bg-slate-100 hover:bg-slate-200 rounded-full transition-colors text-slate-500"><X className="w-6 h-6" /></button>
+              <button onClick={() => setIsCompModalOpen(false)} className="p-2 bg-slate-100 hover:bg-slate-200 rounded-full transition-colors text-slate-500"><X className="w-6 h-6" /></button>
             </div>
             
             <form onSubmit={handleSaveComponent} className="space-y-6">
