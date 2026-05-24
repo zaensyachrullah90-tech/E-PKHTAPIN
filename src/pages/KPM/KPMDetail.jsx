@@ -53,7 +53,7 @@ export default function KPMDetail({
   };
 
   // =========================================================================
-  // HELPER BYPASS GAMBAR GOOGLE DRIVE CORS
+  // HELPER BYPASS GAMBAR GOOGLE DRIVE CORS (FIXED BUG REFRESH HILANG)
   // =========================================================================
   const getDriveImageUrl = (url) => {
     if (!url) return '';
@@ -62,7 +62,8 @@ export default function KPMDetail({
     
     if (String(url).includes('google')) {
       const id = extractIdFromUrl(url);
-      return id ? `https://lh3.googleusercontent.com/d/$${id}` : url;
+      // BUG FIX: Menggunakan ${id} dengan endpoint thumbnail Drive resmi (Bypass CORS & Anti Hilang)
+      return id ? `https://drive.google.com/thumbnail?id=${id}&sz=w1000` : url;
     }
     return url;
   };
@@ -264,7 +265,7 @@ export default function KPMDetail({
         // Simpan ke Database
         await dbUpdate(dbNode, selectedKPM.id, { [tipeFoto]: finalUrl });
         
-        // Update state utama agar merender url asli
+        // Update state utama agar merender url asli yang telah tersimpan di cloud
         setSelectedKPM(prev => ({ ...prev, [tipeFoto]: finalUrl }));
         showToast(`✅ ${itemLabelText(tipeFoto)} berhasil tersimpan di Cloud!`);
       } else {
@@ -478,20 +479,29 @@ export default function KPMDetail({
         <div className="bg-gradient-to-br from-blue-700 via-blue-900 to-slate-900 p-12 text-center text-white relative overflow-hidden">
           <div className="absolute top-0 right-0 w-80 h-80 bg-white opacity-5 rounded-full blur-[100px]"></div>
           
-          {/* UPLOAD FOTO PROFIL */}
+          {/* UPLOAD FOTO PROFIL (BISA DIKLIK UNTUK MELIHAT GAMBAR ASLI) */}
           <div className="relative mx-auto w-32 h-32 mb-6 group relative z-10">
             {selectedKPM.foto_profil ? (
-              <img src={getDriveImageUrl(selectedKPM.foto_profil)} alt="Profil KPM" className="w-full h-full object-cover rounded-[2rem] border-4 border-white/20 shadow-2xl" />
+              <a href={selectedKPM.foto_profil} target="_blank" rel="noreferrer" className="block w-full h-full">
+                <img src={getDriveImageUrl(selectedKPM.foto_profil)} alt="Profil KPM" className="w-full h-full object-cover rounded-[2rem] border-4 border-white/20 shadow-2xl hover:scale-105 transition-transform" />
+              </a>
             ) : (
               <UserSquare className="w-full h-full p-6 bg-white/10 backdrop-blur-md rounded-[2rem] text-white border border-white/20 shadow-2xl" />
             )}
-            <label htmlFor="upload-foto-profil" className="absolute inset-0 bg-slate-900/60 rounded-[2rem] opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center cursor-pointer transition-all backdrop-blur-sm">
+            
+            <div className={`absolute inset-0 bg-slate-900/70 rounded-[2rem] flex flex-col items-center justify-center transition-all backdrop-blur-sm gap-2 pointer-events-none ${uploadingTipe === 'foto_profil' ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
                {uploadingTipe === 'foto_profil' ? (
                   <Loader2 className="w-8 h-8 text-white animate-spin" />
                ) : (
-                  <><Camera className="w-8 h-8 text-white mb-2" /><span className="text-[10px] font-black text-white uppercase tracking-widest text-center px-2">Ganti Foto</span></>
+                  <>
+                    {/* Tombol Lihat Asli HANYA muncul jika url sudah link google drive, bukan local blob */}
+                    {selectedKPM.foto_profil && !String(selectedKPM.foto_profil).startsWith('blob:') && (
+                      <a href={selectedKPM.foto_profil} target="_blank" rel="noreferrer" className="bg-blue-600 text-white text-[10px] font-black px-4 py-1.5 rounded-lg hover:bg-blue-500 w-20 text-center shadow-md pointer-events-auto">Lihat Asli</a>
+                    )}
+                    <label htmlFor="upload-foto-profil" className="bg-slate-700 text-white text-[10px] font-black px-4 py-1.5 rounded-lg cursor-pointer hover:bg-slate-600 w-20 text-center shadow-md flex items-center justify-center pointer-events-auto">Ganti Foto</label>
+                  </>
                )}
-            </label>
+            </div>
             {/* Pakai file picker biasa untuk profil karena di OS mobile akan otomatis memberi opsi Galeri / Kamera */}
             <input type="file" id="upload-foto-profil" accept="image/*" className="hidden" onChange={(e) => handleUploadFoto(e, 'foto_profil')} disabled={uploadingTipe === 'foto_profil'} />
           </div>
@@ -651,12 +661,16 @@ export default function KPMDetail({
                       <h5 className="font-black text-slate-700 text-[10px] mb-4 uppercase tracking-widest flex items-center line-clamp-1"><ImageIcon className="w-4 h-4 mr-2 text-slate-400 group-hover:text-blue-500 transition-colors flex-shrink-0"/> {item.label}</h5>
                       
                       {fotoUrlDisplay ? (
-                        <div className="relative w-full h-40 bg-slate-100 rounded-2xl overflow-hidden mb-4 border border-slate-200">
-                          <img src={fotoUrlDisplay} alt={item.label} className="w-full h-full object-cover" />
-                          <div className="absolute inset-0 bg-slate-900/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center backdrop-blur-sm">
+                        <div className="relative w-full h-40 bg-slate-100 rounded-2xl overflow-hidden mb-4 border border-slate-200 group/img">
+                          {/* FITUR KLIK GAMBAR UNTUK BUKA DI TAB BARU LEBIH BESAR */}
+                          <a href={asliUrl} target="_blank" rel="noreferrer" className="block w-full h-full cursor-pointer">
+                            <img src={fotoUrlDisplay} alt={item.label} className="w-full h-full object-cover hover:scale-110 transition-transform duration-500" />
+                          </a>
+                          
+                          <div className="absolute inset-0 bg-slate-900/60 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center backdrop-blur-sm pointer-events-none">
                             {/* Tombol Lihat Asli HANYA muncul jika url sudah link google drive, bukan local blob */}
                             {!String(fotoUrlDisplay).startsWith('blob:') && (
-                              <a href={asliUrl} target="_blank" rel="noreferrer" className="text-[10px] font-black text-white bg-blue-600 px-4 py-2 rounded-xl shadow-lg hover:bg-blue-500">Buka Asli</a>
+                              <a href={asliUrl} target="_blank" rel="noreferrer" className="text-[10px] font-black text-white bg-blue-600 px-4 py-2 rounded-xl shadow-lg hover:bg-blue-500 pointer-events-auto">Buka Asli</a>
                             )}
                           </div>
                         </div>
@@ -667,7 +681,7 @@ export default function KPMDetail({
                         </div>
                       )}
                       
-                      {/* OPSI UPLOAD KAMERA & GALERI TERPISAH */}
+                      {/* OPSI UPLOAD KAMERA & GALERI TERPISAH (TANPA LOADING LAMA) */}
                       <div className="flex gap-2 w-full mt-auto">
                         <input type="file" id={`cam-${item.key}`} accept="image/*" capture="environment" className="hidden" onChange={(e) => handleUploadFoto(e, item.key)} disabled={isLoad} />
                         <button 
