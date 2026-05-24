@@ -15,11 +15,17 @@ export default function Pengaturan(props) {
     dbUpdate 
   } = props;
   
+  // =========================================================================
+  // STATES UNTUK PROFIL USER
+  // =========================================================================
   const [userName, setUserName] = useState(currentUserData?.nama || '');
   const [userPassword, setUserPassword] = useState(currentUserData?.password || '');
   const [userDriveLink, setUserDriveLink] = useState(currentUserData?.userDriveLink || '');
   const [uploadingFoto, setUploadingFoto] = useState(false);
 
+  // =========================================================================
+  // FUNGSI KOMPRESI GAMBAR (Max 800px, Kualitas 0.6)
+  // =========================================================================
   const compressImage = (file) => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -51,13 +57,27 @@ export default function Pengaturan(props) {
     });
   };
 
-  // ZERO LOADING: Background Update Profil
+  // =========================================================================
+  // HELPER BACA ID FOLDER (Mencegah Error Jika User Paste Link Utuh)
+  // =========================================================================
+  const extractIdFromUrl = (url) => {
+    if (!url) return '';
+    const cleanUrl = String(url).trim();
+    const match = cleanUrl.match(/(?:id=|\/d\/|\/folders\/)([-\w]{25,})/);
+    if (match && match[1]) return match[1];
+    const matchFallback = cleanUrl.match(/^[-\w]{25,}$/);
+    return matchFallback ? matchFallback[0] : cleanUrl;
+  };
+
+  // =========================================================================
+  // FUNGSI UPLOAD FOTO PROFIL KE GOOGLE DRIVE PUSAT (ANTI CORS)
+  // =========================================================================
   const handleUploadFotoProfil = async (e) => {
     const file = e.target.files[0];
     if(!file) return;
 
     const masterGasUrl = aturanPiket?.masterGasUrl;
-    const folderId = aturanPiket?.masterDriveId;
+    const folderId = extractIdFromUrl(aturanPiket?.masterDriveId);
 
     if(!masterGasUrl || !folderId) {
       showToast("Gagal! Admin Pusat belum mengatur Link Script GAS atau ID Folder Drive.");
@@ -78,59 +98,61 @@ export default function Pengaturan(props) {
       };
 
       const res = await fetch(masterGasUrl, { 
-        method: 'POST',
+        method: 'POST', 
         headers: { "Content-Type": "text/plain;charset=utf-8" },
         body: JSON.stringify(payload) 
       });
       const result = await res.json();
       
-      if(result.status === 'success' || result.directUrl) {
-        const finalUrl = result.directUrl || result.url;
-        // Background DB Update
-        dbUpdate('sdmData', currentUserData.id, { foto_profil: finalUrl }).then(() => {
-          showToast(`Selesai! Foto profil berhasil disimpan di Google Drive.`);
-        });
+      // =========================================================================
+      // PERBAIKAN FATAL: Menangkap result.directUrl
+      // =========================================================================
+      if(result.status === 'success' || result.directUrl || result.url) {
+        const finalImageLink = result.directUrl || result.url || result.fileUrl;
+        await dbUpdate('sdmData', currentUserData.id, { foto_profil: finalImageLink });
+        showToast(`Selesai! Foto profil berhasil diganti dan tersimpan di Google Drive.`);
       } else {
         showToast("Error Script: " + (result.error || "Gagal upload"));
       }
     } catch (err) { 
-      showToast("Gagal unggah. Cek koneksi Anda."); 
+      showToast("Eror Koneksi. Pastikan Link Drive & Mesin GAS benar."); 
     } finally { 
       setUploadingFoto(false); 
       e.target.value = null;
     }
   };
 
-  const handleSaveProfile = (e) => {
+  // =========================================================================
+  // FUNGSI SIMPAN PROFIL & SISTEM ADMIN
+  // =========================================================================
+  const handleSaveProfile = async (e) => {
     e.preventDefault();
     if (currentUserData && currentUserData.id) {
-       // ZERO LOADING: Langsung hajar DB tanpa layar loading
-       dbUpdate('sdmData', currentUserData.id, { 
+       await dbUpdate('sdmData', currentUserData.id, { 
          nama: userName,
          password: userPassword,
          userDriveLink: userDriveLink 
-       }).then(() => {
-         showToast("Profil Login & Tautan Drive Berhasil Disimpan!");
        });
+       showToast("Profil Login & Tautan Drive Berhasil Disimpan!");
     }
   };
 
-  const handleSaveAdminSistem = (e) => {
+  const handleSaveAdminSistem = async (e) => {
     e.preventDefault();
     if(setAturanPiket) {
-       // ZERO LOADING: Simpan konfigurasi Server
-       dbUpdate('aturanPiket', 'global', aturanPiket).then(() => {
-         showToast("Pengaturan Sistem Pusat Berhasil Diperbarui!");
-       });
+       await dbUpdate('aturanPiket', 'global', aturanPiket);
+       showToast("Pengaturan Sistem Pusat Berhasil Diperbarui!");
     }
   };
 
   return (
     <div className="max-w-5xl mx-auto space-y-6 animate-in fade-in pb-10">
       
+      {/* ------------------------------------------------------------- */}
+      {/* TABS NAVIGATION */}
+      {/* ------------------------------------------------------------- */}
       <div className="flex bg-white rounded-2xl p-2 shadow-sm border border-slate-200 overflow-x-auto scrollbar-hide">
         <button 
-          type="button"
           onClick={() => setSettingTab('profil')} 
           className={`flex-shrink-0 px-8 py-3.5 text-sm font-black rounded-xl cursor-pointer transition-all ${settingTab === 'profil' ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/30' : 'text-slate-500 hover:bg-slate-50'}`}
         >
@@ -138,7 +160,6 @@ export default function Pengaturan(props) {
         </button>
         {isKorkab && (
           <button 
-            type="button"
             onClick={() => setSettingTab('sistem')} 
             className={`flex-shrink-0 px-8 py-3.5 text-sm font-black rounded-xl cursor-pointer transition-all ${settingTab === 'sistem' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/30' : 'text-slate-500 hover:bg-slate-50'}`}
           >
@@ -147,6 +168,9 @@ export default function Pengaturan(props) {
         )}
       </div>
 
+      {/* ------------------------------------------------------------- */}
+      {/* TAB 1: PENGATURAN PROFIL USER */}
+      {/* ------------------------------------------------------------- */}
       {settingTab === 'profil' && (
         <div className="bg-white rounded-[2rem] shadow-sm border border-slate-100 overflow-hidden animate-in zoom-in-95">
           
@@ -260,6 +284,9 @@ export default function Pengaturan(props) {
         </div>
       )}
 
+      {/* ------------------------------------------------------------- */}
+      {/* TAB 2: PENGATURAN SISTEM (KHUSUS ADMIN/KORKAB) */}
+      {/* ------------------------------------------------------------- */}
       {settingTab === 'sistem' && isKorkab && (
         <div className="bg-white rounded-[2rem] shadow-sm border border-slate-100 p-8 lg:p-10 animate-in zoom-in-95">
            <div className="flex items-center mb-8 border-b border-slate-100 pb-6">
@@ -271,6 +298,8 @@ export default function Pengaturan(props) {
            </div>
            
            <form onSubmit={handleSaveAdminSistem} className="space-y-6">
+             
+             {/* KOTAK PENGATURAN LINK DRIVE PUSAT & GAS */}
              <div className="bg-indigo-50 p-7 rounded-[2.5rem] border border-indigo-100 shadow-sm space-y-6">
                 <h4 className="font-black text-indigo-800 text-sm uppercase tracking-widest flex items-center border-b border-indigo-200/50 pb-3">
                   <Cloud className="w-5 h-5 mr-2"/> Konfigurasi Google Drive Pusat
@@ -315,6 +344,7 @@ export default function Pengaturan(props) {
                 <p className="text-[10px] text-indigo-500 font-bold mt-3 italic">*Semua foto dan dokumen dari seluruh SDM akan dikumpulkan menjadi satu dan disusun rapi per folder otomatis di dalam ID Folder Google Drive Pusat di atas.</p>
              </div>
              
+             {/* KOTAK PENGATURAN JAM PIKET */}
              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pt-4">
                <div>
                  <label className="block text-[11px] font-black text-slate-500 mb-2 uppercase tracking-widest ml-1">Jam Mulai Piket</label>
@@ -326,6 +356,7 @@ export default function Pengaturan(props) {
                </div>
              </div>
 
+             {/* KOTAK DENDA */}
              <div className="bg-red-50 p-6 rounded-2xl border border-red-100 shadow-sm mt-4">
                <h4 className="font-black text-red-800 mb-4 text-xs uppercase tracking-widest flex items-center"><AlertCircle className="w-4 h-4 mr-2"/> Nominal Denda Keterlambatan (Rp)</h4>
                <input type="number" value={aturanPiket?.denda} onChange={(e) => setAturanPiket({...aturanPiket, denda: parseInt(e.target.value)})} className="w-full p-5 border border-red-200 rounded-xl font-black focus:border-red-400 focus:ring-4 focus:ring-red-100 outline-none text-red-700 bg-white text-lg transition-all"/>
