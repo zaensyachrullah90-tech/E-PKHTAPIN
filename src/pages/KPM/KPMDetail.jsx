@@ -158,9 +158,6 @@ export default function KPMDetail({
 
     const masterGasUrl = aturanPiket?.masterGasUrl;
     
-    // =========================================================================
-    // FIX KOSONG: Fallback Otomatis ke Master Drive ID
-    // =========================================================================
     let folderId = extractIdFromUrl(currentUserData?.userDriveLink);
     if (!folderId || folderId.length < 10) {
       folderId = extractIdFromUrl(aturanPiket?.masterDriveId);
@@ -221,15 +218,26 @@ export default function KPMDetail({
       
       const result = await res.json();
       
-      // =========================================================================
-      // PERBAIKAN FATAL: Menangkap result.directUrl (Link Mentahan Gambar)
-      // =========================================================================
       if(result.status === 'success' || result.directUrl || result.url) {
-        const finalImageLink = result.directUrl || result.url; // PAKAI DIRECT URL
+        // =========================================================================
+        // PERBAIKAN TUNTAS: Thumbnail API Google Drive agar pasti terbaca di <img>
+        // =========================================================================
+        const finalImageLink = result.fileId 
+          ? `https://drive.google.com/thumbnail?id=${result.fileId}&sz=w1000` 
+          : (result.directUrl || result.url); 
+
         const dbNode = selectedKPM.bansos_type === 'PKH' ? 'kpmPkhData' : selectedKPM.bansos_type === 'Sembako' ? 'kpmSembakoData' : 'kpmData';
+        
+        // Simpan ke Database
         await dbUpdate(dbNode, selectedKPM.id, { [tipeFoto]: finalImageLink });
-        selectedKPM[tipeFoto] = finalImageLink;
-        showToast(`Selesai! Foto berhasil tersimpan di Drive dan tampil di Sistem.`);
+        
+        // =========================================================================
+        // PERBAIKAN MUTLAK: Paksa React Re-Render secara Instan!
+        // Ini yang mengobati "baru ganti pas diupload ulang"
+        // =========================================================================
+        setSelectedKPM(prev => ({ ...prev, [tipeFoto]: finalImageLink }));
+        
+        showToast(`Selesai! Foto berhasil tersimpan di Drive dan langsung tampil di Sistem.`);
       } else {
         showToast("Error Script Drive: " + (result.error || "Gagal upload"));
       }
