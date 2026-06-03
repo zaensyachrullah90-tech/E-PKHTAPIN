@@ -442,7 +442,7 @@ export default function App() {
               // PENTING: MENGUNCI MASTER URL AGAR TIDAK HILANG SAAT DATABASE KOSONG
               const updatedRules = {
                  ...d,
-                 masterGasUrl: d?.masterGasUrl || 'https://script.google.com/macros/s/AKfycbyiOjCIEeFZAMF4HBZn6SSJP5qFsHcLOIIu-ndIBrGKUtoAchJBIm1rTxH75NmGA2Nd/exec',
+                 masterGasUrl: d?.masterGasUrl || 'https://script.google.com/macros/s/AKfycbxiTiinq57TzTdhjjX4T_bQDv9Jzxrh9u1taOZHl6mkURW_hkOZrGtwbVEnTSauzUJZ/exec',
                  masterDriveId: d?.masterDriveId || '1vEnFaNhvy_NaWWg-d9MV06cVV0ZLO5Ci'
               };
               setter(updatedRules); 
