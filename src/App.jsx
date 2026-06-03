@@ -63,16 +63,8 @@ const defaultCatatan = [];
 const defaultPiket = [];
 
 const defaultLibur = [
-  { 
-    id: 'libur_1', 
-    tgl: '2026-05-01', 
-    ket: 'Hari Buruh Internasional' 
-  }, 
-  { 
-    id: 'libur_2', 
-    tgl: '2026-05-14', 
-    ket: 'Kenaikan Yesus Kristus' 
-  }
+  { id: 'libur_1', tgl: '2026-05-01', ket: 'Hari Buruh Internasional' }, 
+  { id: 'libur_2', tgl: '2026-05-14', ket: 'Kenaikan Yesus Kristus' }
 ];
 
 const defaultAgendaTitles = [
@@ -84,7 +76,7 @@ const defaultAgendaTitles = [
 
 export default function App() {
   // ====================================================================
-  // GLOBAL STATES & OFFLINE ENGINE
+  // GLOBAL STATES
   // ====================================================================
   const [firebaseUser, setFirebaseUser] = useState(null);
   const [isInitializing, setIsInitializing] = useState(true);
@@ -93,7 +85,7 @@ export default function App() {
   const [pendingQueueCount, setPendingQueueCount] = useState(0);
 
   // ====================================================================
-  // PERSISTENT STATES (LOCAL STORAGE)
+  // PERSISTENT STATES
   // ====================================================================
   const [isLoggedIn, setIsLoggedIn] = usePersistentState('pkh_is_logged_in', 'false');
   const [selectedUserId, setSelectedUserId] = usePersistentState('pkh_user_id', '');
@@ -155,7 +147,7 @@ export default function App() {
   const [filterDesaMaps, setFilterDesaMaps] = useState('Semua');
 
   // ====================================================================
-  // DATA COLLECTIONS STATES (DATABASE)
+  // DATABASE COLLECTIONS
   // ====================================================================
   const [sdmData, setSdmData] = useState([]);
   const [kpmDataLegacy, setKpmDataLegacy] = useState([]); 
@@ -172,30 +164,23 @@ export default function App() {
   const [liburData, setLiburData] = useState([]);
   const [agendaTitlesData, setAgendaTitlesData] = useState([]);
   const [aplikasiEksternal, setAplikasiEksternal] = useState([
-    { 
-      id: 'app1', 
-      nama: 'SIKS-NG KEMENSOS', 
-      url: 'https://siks.kemensos.go.id' 
-    }
+    { id: 'app1', nama: 'SIKS-NG KEMENSOS', url: 'https://siks.kemensos.go.id' }
   ]);
   
-  // Tautan Apps Script dan Drive Folder Anda Ditetapkan Di Sini
+  // ATURAN PIKET SEKALIGUS PENYIMPAN KONFIGURASI GAS DRIVE
   const [aturanPiket, setAturanPiket] = useState({ 
     jamMulai: '08:00', 
     jamSelesai: '16:00', 
     denda: 50000, 
-    masterGasUrl: 'https://script.google.com/macros/s/AKfycbyiOjCIEeFZAMF4HBZn6SSJP5qFsHcLOIIu-ndIBrGKUtoAchJBIm1rTxH75NmGA2Nd/exec', 
+    masterGasUrl: 'https://script.google.com/macros/s/AKfycbzNls0aVISEWuTt4BEc65hOIri79Bx5UUddy2orhRCz0jB3rZgoGuEGpwT4WXYQzdhp/exec', 
     masterDriveId: '1vEnFaNhvy_NaWWg-d9MV06cVV0ZLO5Ci' 
   });
 
-  // ====================================================================
-  // CONSTANTS
-  // ====================================================================
-  // PENTING: Class input form agar tidak bentrok (ditulis 1 kali saja)
+  // KELAS INPUT GLOBAL
   const inputClass = "w-full p-4 border border-slate-200 rounded-xl text-base font-bold focus:ring-4 focus:ring-blue-100 focus:border-blue-500 outline-none transition-all bg-slate-50 focus:bg-white text-slate-800 relative z-20";
 
   // ====================================================================
-  // SAFE ARRAYS (Melindungi aplikasi dari undefined errors)
+  // SAFE ARRAYS
   // ====================================================================
   const safeSdmData = Array.isArray(sdmData) ? sdmData : [];
   const safeAgendaData = Array.isArray(agendaData) ? agendaData : [];
@@ -213,37 +198,37 @@ export default function App() {
     ...(Array.isArray(kpmPkhData) ? kpmPkhData.map(k => ({...k, bansos_type: 'PKH'})) : []), 
     ...(Array.isArray(kpmSembakoData) ? kpmSembakoData.map(k => ({...k, bansos_type: 'Sembako'})) : [])
   ];
-
+  
   const uniqueKpmMap = new Map();
   combinedKpm.forEach(item => uniqueKpmMap.set(item.id, item));
   const safeKpmData = Array.from(uniqueKpmMap.values());
 
   // ====================================================================
-  // TIME HELPERS
+  // TIME & UTILS
   // ====================================================================
   const getLocalWITA = () => { 
     const d = new Date(); 
     const utc = d.getTime() + (d.getTimezoneOffset() * 60000); 
     return new Date(utc + (3600000 * 8)); 
   };
-  
+
   const getWitaYYYYMMDD = () => { 
     const d = getLocalWITA(); 
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; 
   };
-  
+
   const getWitaHHMM = () => { 
     const d = getLocalWITA(); 
     return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; 
   };
-  
+
   const showToast = (msg) => { 
     setToastMessage(String(msg)); 
     setTimeout(() => setToastMessage(null), 4000); 
   };
 
   // ====================================================================
-  // OFFLINE QUEUE ENGINE
+  // OFFLINE QUEUE (Data Antrian saat Tidak Ada Sinyal)
   // ====================================================================
   useEffect(() => {
     const handleOnline = () => { 
@@ -251,6 +236,7 @@ export default function App() {
       showToast("Kembali Online! Menyinkronkan data..."); 
       processOfflineQueue(); 
     };
+
     const handleOffline = () => { 
       setIsOnline(false); 
       showToast("Sinyal Hilang! Mode Offline Aktif."); 
@@ -262,7 +248,9 @@ export default function App() {
     const q = JSON.parse(localStorage.getItem('pkh_offline_queue') || '[]'); 
     setPendingQueueCount(q.length);
     
-    if(navigator.onLine && q.length > 0) processOfflineQueue();
+    if(navigator.onLine && q.length > 0) {
+      processOfflineQueue();
+    }
     
     return () => { 
       window.removeEventListener('online', handleOnline); 
@@ -297,7 +285,9 @@ export default function App() {
     setPendingQueueCount(newQueue.length); 
     setIsSaving(false);
     
-    if (successCount > 0) showToast(`${successCount} Data Offline Berhasil Disinkronkan!`);
+    if (successCount > 0) {
+      showToast(`${successCount} Data Offline Berhasil Disinkronkan!`);
+    }
   };
 
   const addToOfflineQueue = (action, collName, id, data) => {
@@ -308,10 +298,54 @@ export default function App() {
   };
 
   // ====================================================================
-  // CLEANSING & FILTER LOGIC (Anti 0 Hasil)
+  // FUNGSI UPLOAD GLOBAL (ANTI CORS ERROR) - React ke GAS Google Drive
+  // ====================================================================
+  const uploadFotoKeDrive = async (base64String, namaFoto, subFolder = "Uploads PKH") => {
+    const urlGas = aturanPiket?.masterGasUrl || "https://script.google.com/macros/s/AKfycbyiOjCIEeFZAMF4HBZn6SSJP5qFsHcLOIIu-ndIBrGKUtoAchJBIm1rTxH75NmGA2Nd/exec";
+    const targetFolderId = aturanPiket?.masterDriveId || "1vEnFaNhvy_NaWWg-d9MV06cVV0ZLO5Ci";
+
+    if (!base64String) return null;
+
+    setIsSaving(true);
+    const payload = {
+      base64: base64String,
+      fileName: namaFoto,
+      targetFolderId: targetFolderId,
+      subFolder: subFolder,
+      mimeType: "image/jpeg"
+    };
+
+    try {
+      const response = await fetch(urlGas, {
+        method: "POST",
+        // PENTING: Gunakan text/plain agar browser tidak memblokir (Bypass Preflight CORS)
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify(payload),
+      });
+
+      const result = await response.json();
+      if (result.status === "success") {
+        showToast("Foto berhasil diupload ke Drive!");
+        return result.url; 
+      } else {
+        showToast("Error dari Drive: " + result.message);
+        return null;
+      }
+    } catch (error) {
+      console.error("Upload error:", error);
+      showToast("Koneksi ke Drive gagal. Pastikan URL GAS benar.");
+      return null;
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // ====================================================================
+  // CLEANSING FILTER KPM
   // ====================================================================
   const getKpmVal = (obj, targetType) => {
     if (!obj || typeof obj !== 'object') return '';
+    
     const keys = Object.keys(obj);
     
     const isBadNameValue = (val) => { 
@@ -369,6 +403,7 @@ export default function App() {
 
   let activeSdmList = [];
   const seenIdentifier = new Set(); 
+  
   activeSdmList.push(defaultSdm[0]); 
   seenIdentifier.add('admin'); 
   seenIdentifier.add('Master Admin');
@@ -387,17 +422,20 @@ export default function App() {
   });
 
   const hasMasterAdmin = activeSdmList.some(s => s.role === 'ketuatim_kab' || s.nik === 'admin');
-  if (!hasMasterAdmin) activeSdmList = [...defaultSdm, ...activeSdmList];
+  if (!hasMasterAdmin) {
+    activeSdmList = [...defaultSdm, ...activeSdmList];
+  }
 
   const urlParams = new URLSearchParams(window.location.search);
   const isPublicView = urlParams.get('share') === 'jadwal' && urlParams.get('id');
 
   const currentUserData = activeSdmList.find(s => String(s.id) === String(selectedUserId)) || activeSdmList[0] || { id: 'guest', nama: 'Memuat...', role: 'pendamping', status: 'Aktif' };
+  
   const isKorkab = currentUserData?.role === 'ketuatim_kab'; 
   const isKorcam = currentUserData?.role === 'ketuatim_kec';
 
   // ====================================================================
-  // FIREBASE REALTIME SYNC
+  // FIREBASE REALTIME DB SYNC (MENDENGARKAN PERUBAHAN DB)
   // ====================================================================
   useEffect(() => {
     if (!auth) return;
@@ -408,7 +446,9 @@ export default function App() {
         } else {
           await signInAnonymously(auth); 
         }
-      } catch (e) {} 
+      } catch (e) {
+        console.error("Auth error:", e);
+      } 
     };
     initAuth();
     
@@ -439,14 +479,13 @@ export default function App() {
             } else if (collName === 'liburData') {
               parsedData.sort((a, b) => new Date(a.tgl) - new Date(b.tgl));
             } else if (collName === 'aturanPiket') { 
-              // PENTING: MENGUNCI MASTER URL AGAR TIDAK HILANG SAAT DATABASE KOSONG
-              const updatedRules = {
-                 ...d,
-                 masterGasUrl: d?.masterGasUrl || 'https://script.google.com/macros/s/AKfycbxiTiinq57TzTdhjjX4T_bQDv9Jzxrh9u1taOZHl6mkURW_hkOZrGtwbVEnTSauzUJZ/exec',
-                 masterDriveId: d?.masterDriveId || '1vEnFaNhvy_NaWWg-d9MV06cVV0ZLO5Ci'
+              const defaultRules = { 
+                 ...d, 
+                 masterGasUrl: d.masterGasUrl || 'https://script.google.com/macros/s/AKfycbyiOjCIEeFZAMF4HBZn6SSJP5qFsHcLOIIu-ndIBrGKUtoAchJBIm1rTxH75NmGA2Nd/exec',
+                 masterDriveId: d.masterDriveId || '1vEnFaNhvy_NaWWg-d9MV06cVV0ZLO5Ci' 
               };
-              setter(updatedRules); 
-              localStorage.setItem(`pkh_cache_${collName}`, JSON.stringify(updatedRules)); 
+              setter(defaultRules); 
+              localStorage.setItem(`pkh_cache_${collName}`, JSON.stringify(defaultRules)); 
               return; 
             } else {
               parsedData.reverse(); 
@@ -454,7 +493,9 @@ export default function App() {
             
             setter(parsedData); 
             localStorage.setItem(`pkh_cache_${collName}`, JSON.stringify(parsedData));
-          } catch(err) {}
+          } catch(err) {
+            console.error("Parse error realtime:", err);
+          }
         } else {
           setter(defaultDataArray); 
           localStorage.setItem(`pkh_cache_${collName}`, JSON.stringify(defaultDataArray));
@@ -462,11 +503,14 @@ export default function App() {
           if (defaultDataArray.length > 0 && navigator.onLine && !['kpmPkhData', 'kpmSembakoData', 'mappingWilayahData'].includes(collName)) {
             defaultDataArray.forEach(async item => { 
               const { id, ...dataWithoutId } = item; 
-              try { await set(ref(db, `${getBasePath(collName)}/${id}`), dataWithoutId); } catch(e) {} 
+              try { 
+                await set(ref(db, `${getBasePath(collName)}/${id}`), dataWithoutId); 
+              } catch(e) {} 
             });
           }
         }
       }, () => {}); 
+      
       return unsub;
     } catch (err) { 
       return () => {}; 
@@ -488,6 +532,7 @@ export default function App() {
     const u12 = bindRealtimeDataWithSeed('kpmPkhData', setKpmPkhData, []); 
     const u13 = bindRealtimeDataWithSeed('kpmSembakoData', setKpmSembakoData, []); 
     const u14 = bindRealtimeDataWithSeed('mappingWilayahData', setMappingWilayahData, []); 
+    
     const u15 = bindRealtimeDataWithSeed('aturanPiket', setAturanPiket, { 
       jamMulai: '08:00', 
       jamSelesai: '16:00', 
@@ -505,6 +550,7 @@ export default function App() {
 
   useEffect(() => {
     if(isPublicView) return; 
+    
     const savedUserId = localStorage.getItem('pkh_user_id');
     setTimeout(() => { 
       if (savedUserId && isLoggedIn === 'true') { 
@@ -516,7 +562,7 @@ export default function App() {
   }, [isLoggedIn, isPublicView]);
 
   // ====================================================================
-  // DB ACTIONS (OFFLINE READY)
+  // DATABASE ACTIONS
   // ====================================================================
   const dbAdd = async (collName, data) => { 
     setIsSaving(true);
@@ -573,12 +619,10 @@ export default function App() {
     } 
   };
 
-  // ====================================================================
-  // FILTERING LOGIC (SDM, KPM, AGENDA)
-  // ====================================================================
   const getFilteredSDM = (data) => {
     if (!Array.isArray(data)) return []; 
     if (isKorkab) return data; 
+    
     if (isKorcam) { 
       const userKec = String(currentUserData?.kecamatan || '').toLowerCase().trim(); 
       return data.filter(s => { 
@@ -586,6 +630,7 @@ export default function App() {
         return sKec !== '' && (sKec.includes(userKec) || userKec.includes(sKec)); 
       }); 
     }
+    
     return data.filter(s => s.id === currentUserData?.id);
   };
 
@@ -615,7 +660,6 @@ export default function App() {
     
     const arrDesaDampingan = dataMappingSaya.map(m => cleanStr(getKpmVal(m, 'desa'))).filter(Boolean);
     const profileDesas = String(currentUserData?.desa_dampingan || currentUserData?.desa || '').split(',').map(d => cleanStr(d)).filter(Boolean);
-    
     const allMyDesas = [...new Set([...arrDesaDampingan, ...profileDesas])].filter(d => d !== '');
 
     return data.filter(k => {
@@ -637,14 +681,16 @@ export default function App() {
   const getFilteredAgenda = (data) => { 
     if(!Array.isArray(data)) return []; 
     if (isKorkab) return data;
+    
     if (isKorcam) {
       return data.filter(a => String(a.kecamatan) === String(currentUserData?.kecamatan)); 
     }
+    
     return data.filter(a => String(a.pic) === String(currentUserData?.nama) || String(a.pic) === 'Seluruh SDM' || String(a.pic) === 'Semua SDM');
   };
 
   // ====================================================================
-  // SCHEDULE GENERATOR (PIKET)
+  // SCHEDULE GENERATOR LOGIC
   // ====================================================================
   async function handleGeneratePiketReal() {
     setShowGeneratorModal(true); 
@@ -656,6 +702,7 @@ export default function App() {
     
     setTimeout(async () => {
       setGeneratorStep(4);
+      
       const pendampingList = activeSdmList.filter(s => String(s.status) === 'Aktif').map(s => String(s.nama).toUpperCase());
       if(pendampingList.length === 0) {
         pendampingList.push(String(currentUserData?.nama || 'ADMIN').toUpperCase());
@@ -673,6 +720,7 @@ export default function App() {
         const cekTgl = new Date(thn, blnSekarang, h); 
         const tglString = `${thn}-${String(blnSekarang + 1).padStart(2, '0')}-${String(h).padStart(2, '0')}`;
         const isLibur = safeLiburData.some(l => l.tgl === tglString);
+        
         if (cekTgl.getDay() !== 0 && cekTgl.getDay() !== 6 && !isLibur) { 
           workingDays.push({ 
             h: h, 
@@ -699,6 +747,7 @@ export default function App() {
       let remainder = totalSlots % W; 
       
       workingDays.forEach(d => d.cap = baseCap);
+      
       let mondays = workingDays.filter(d => d.isMonday).sort(() => 0.5 - Math.random());
       let nonMondays = workingDays.filter(d => !d.isMonday).sort(() => 0.5 - Math.random());
       let priorityDays = [...mondays, ...nonMondays];
@@ -706,6 +755,7 @@ export default function App() {
       for(let i = 0; i < remainder; i++) {
         priorityDays[i].cap++;
       }
+      
       workingDays.sort((a, b) => a.h - b.h); 
 
       let assignments = {}; 
@@ -764,16 +814,15 @@ export default function App() {
         await set(ref(db, getBasePath('piketData')), jadwalBaru); 
         showToast(`Selesai! ${W} Hari Kerja. Setiap SDM piket ${shiftsPerPerson}x sebulan.`); 
       }
+      
       setShowGeneratorModal(false);
     }, 4000);
   }
 
-  // ====================================================================
-  // SWAP PIKET
-  // ====================================================================
   const handleRequestSwap = async (idA, namaA, idB, namaB) => {
     const dataA = safePiketData.find(p => p.id === idA); 
     const dataB = safePiketData.find(p => p.id === idB);
+    
     if (dataA && dataB) {
       setIsSaving(true);
       try {
@@ -809,6 +858,7 @@ export default function App() {
         
         await dbUpdate('piketData', myPiketId, { nama: myNames.join(' & '), swapRequest: null });
         await dbUpdate('piketData', req.fromId, { nama: fromNames.join(' & '), swapRequest: null });
+        
         showToast("Tukar Jadwal Individu Berhasil Disetujui!");
       }
     } catch(e) { 
@@ -831,7 +881,7 @@ export default function App() {
   };
 
   // ====================================================================
-  // AUTHENTICATION LOGIC
+  // AUTHENTICATION
   // ====================================================================
   const fastDemoLogin = (uid) => { 
     localStorage.setItem('pkh_user_id', uid); 
@@ -843,14 +893,8 @@ export default function App() {
   
   const handleLoginSubmit = (e) => {
     e.preventDefault();
-    if (loginUsername === 'admin' && loginPassword === 'admin') {
-      return fastDemoLogin('admin1');
-    }
-    
-    const matchUser = activeSdmList.find(x => 
-      String(x.nik) === String(loginUsername) && String(x.password) === String(loginPassword)
-    );
-    
+    if (loginUsername === 'admin' && loginPassword === 'admin') return fastDemoLogin('admin1');
+    const matchUser = activeSdmList.find(x => String(x.nik) === String(loginUsername) && String(x.password) === String(loginPassword));
     if (matchUser) {
       fastDemoLogin(matchUser.id); 
     } else {
@@ -866,29 +910,26 @@ export default function App() {
     showToast('Berhasil Keluar dari Sistem.'); 
   };
 
-  // ====================================================================
-  // NAVIGATION LOGIC
-  // ====================================================================
   const goToMenu = (m, s = null) => { 
     setActiveTab(m);
     if (s) { 
       if (m === 'agenda') { setAgendaSubTab(s); setSelectedAgendaCategory(null); } 
       if (m === 'tugas') { setTugasTab(s); setSelectedTaskView(null); setSelectedVoteView(null); setSelectedJadwalView(null); } 
-      if (m === 'monitoring') { setMonitoringSubTab(s); }
-      if (m === 'laporan') { setLaporanTab(s); }
-      if (m === 'kpm') { setKpmMainTab(s); }
-      if (m === 'pengaturan') { setSettingTab(s); }
-      if (m === 'sdm') { setSdmSubTab(s); }
-      if (m === 'catatan') { setCatatanTab(s); }
-      if (m === 'manajemen_data') { setActiveTab('manajemen_data'); }
+      if (m === 'monitoring') setMonitoringSubTab(s); 
+      if (m === 'laporan') setLaporanTab(s); 
+      if (m === 'kpm') setKpmMainTab(s); 
+      if (m === 'pengaturan') setSettingTab(s); 
+      if (m === 'sdm') setSdmSubTab(s); 
+      if (m === 'catatan') setCatatanTab(s);
+      if (m === 'manajemen_data') setActiveTab('manajemen_data');
     } else {
-       if (m === 'catatan') { setCatatanTab('input'); }
+       if (m === 'catatan') setCatatanTab('input');
     }
     setIsSidebarOpen(false); 
   };
 
   // ====================================================================
-  // RENDERING UI
+  // RENDER UTAMA
   // ====================================================================
   if (isInitializing) {
     return (
@@ -916,7 +957,6 @@ export default function App() {
     );
   }
 
-  // --- Props Passage ---
   const safePiketDataToPass = safePiketData;
   const safeAgendaDataToPass = safeAgendaData;
   const safeTasksDataToPass = safeTasksData;
@@ -925,7 +965,7 @@ export default function App() {
   return (
     <div className="flex h-screen bg-slate-50/50 font-sans text-slate-900 overflow-hidden w-full selection:bg-blue-200 selection:text-blue-900">
       
-      {/* --- OFFLINE WARNINGS --- */}
+      {/* OFFLINE INDICATORS */}
       {!isOnline && (
         <div className="fixed top-0 left-0 w-full bg-orange-600 text-white text-[10px] font-black uppercase tracking-widest py-2 px-4 text-center z-[9999] shadow-lg flex items-center justify-center">
           <WifiOff className="w-4 h-4 mr-2" /> Mode Offline Aktif - Data Disimpan Sementara di HP
@@ -945,7 +985,7 @@ export default function App() {
         />
       )}
 
-      {/* --- SIDEBAR --- */}
+      {/* SIDEBAR NAVIGATION */}
       <Sidebar 
         activeTab={activeTab} 
         goToMenu={goToMenu} 
@@ -955,8 +995,9 @@ export default function App() {
         setIsSidebarOpen={setIsSidebarOpen} 
       />
 
+      {/* MAIN LAYOUT WRAPPER */}
       <div className="flex-1 flex flex-col h-screen overflow-hidden relative w-full">
-        {/* --- HEADER --- */}
+        
         <Header 
           activeTab={activeTab} 
           setIsSidebarOpen={setIsSidebarOpen} 
@@ -966,10 +1007,10 @@ export default function App() {
           showToast={showToast} 
         />
         
-        {/* --- MAIN CONTENT AREA --- */}
         <main className={`flex-1 overflow-x-hidden overflow-y-auto p-4 md:p-6 lg:p-8 scroll-smooth ${!isOnline || pendingQueueCount > 0 ? 'mt-8' : ''}`}>
           <div className="mx-auto max-w-7xl">
             
+            {/* ROUTING COMPONENT SWITCHER */}
             {activeTab === 'dashboard' && !selectedKPM && (
               <Dashboard 
                 currentUserData={currentUserData} 
@@ -981,10 +1022,10 @@ export default function App() {
                 safeTasksData={safeTasksDataToPass} 
                 safeVotesData={safeVotesDataToPass} 
                 goToMenu={goToMenu} 
+                uploadToDrive={uploadFotoKeDrive} 
               />
             )}
-
-            {/* --- AGENDA COMPONENT --- */}
+            
             {activeTab === 'agenda' && !selectedKPM && (
               <Agenda 
                 agendaSubTab={agendaSubTab} 
@@ -1022,7 +1063,7 @@ export default function App() {
                 currentUserData={currentUserData} 
               />
             )}
-
+            
             {activeTab === 'catatan' && !selectedKPM && (
               <CatatanHarian 
                 catatanTab={catatanTab} 
@@ -1033,9 +1074,10 @@ export default function App() {
                 dbDelete={dbDelete} 
                 dbAdd={dbAdd} 
                 showToast={showToast} 
+                uploadToDrive={uploadFotoKeDrive} 
               />
             )}
-
+            
             {activeTab === 'kpm' && !selectedKPM && (
               <KPMList 
                 kpmMainTab={kpmMainTab} 
@@ -1047,7 +1089,7 @@ export default function App() {
                 setSelectedKPM={setSelectedKPM} 
               />
             )}
-
+            
             {activeTab === 'kpm' && selectedKPM && (
               <KPMDetail 
                 selectedKPM={selectedKPM} 
@@ -1059,9 +1101,10 @@ export default function App() {
                 currentUserData={currentUserData} 
                 activeSdmList={activeSdmList} 
                 aturanPiket={aturanPiket} 
+                uploadToDrive={uploadFotoKeDrive} 
               />
             )}
-
+            
             {activeTab === 'monitoring' && !selectedKPM && (
               <Monitoring 
                 monitoringSubTab={monitoringSubTab} 
@@ -1074,9 +1117,10 @@ export default function App() {
                 dbUpdate={dbUpdate} 
                 currentUserData={currentUserData} 
                 aturanPiket={aturanPiket} 
+                uploadToDrive={uploadFotoKeDrive} 
               />
             )}
-
+            
             {activeTab === 'tugas' && !selectedKPM && (
               <Tugas 
                 tugasTab={tugasTab} 
@@ -1104,9 +1148,10 @@ export default function App() {
                 setSelectedVote={setSelectedVote} 
                 setShowTambahJadwalModal={setShowTambahJadwalModal} 
                 setShowIsiJadwalModal={setShowIsiJadwalModal} 
+                uploadToDrive={uploadFotoKeDrive} 
               />
             )}
-
+            
             {activeTab === 'pengaduan' && !selectedKPM && (
               <Pengaduan 
                 safePengaduanData={safePengaduanData} 
@@ -1114,9 +1159,10 @@ export default function App() {
                 setShowPengaduanModal={setShowPengaduanModal} 
                 setSelectedPengaduan={setSelectedPengaduan} 
                 setShowTindakLanjutModal={setShowTindakLanjutModal} 
+                uploadToDrive={uploadFotoKeDrive} 
               />
             )} 
-
+            
             {activeTab === 'laporan' && !selectedKPM && (
               <Laporan 
                 laporanTab={laporanTab} 
@@ -1125,9 +1171,10 @@ export default function App() {
                 currentUserData={currentUserData} 
                 aturanPiket={aturanPiket} 
                 showToast={showToast} 
+                uploadToDrive={uploadFotoKeDrive} 
               />
             )}
-
+            
             {activeTab === 'ranking' && !selectedKPM && (
               <Ranking 
                 rankingData={[
@@ -1163,7 +1210,7 @@ export default function App() {
                 showToast={showToast} 
               />
             )}
-
+            
             {activeTab === 'aplikasi_lainnya' && !selectedKPM && (
               <AplikasiLainnya 
                 aplikasiEksternal={aplikasiEksternal} 
@@ -1172,7 +1219,7 @@ export default function App() {
                 getAppIcon={getAppIcon} 
               />
             )}
-
+            
             {activeTab === 'pengaturan' && !selectedKPM && (
               <Pengaturan 
                 settingTab={settingTab} 
@@ -1195,15 +1242,15 @@ export default function App() {
         </main>
       </div>
 
-      {/* --- NOTIFICATION TOAST --- */}
+      {/* TOAST ALERTS */}
       {toastMessage && (
         <div className="fixed bottom-6 left-1/2 lg:left-[calc(50%+9rem)] -translate-x-1/2 bg-slate-900/95 backdrop-blur-md text-white px-6 py-4 rounded-2xl text-sm z-[200] animate-in fade-in flex items-center shadow-2xl font-medium border border-slate-700/50">
-          <CheckCircle className="w-5 h-5 mr-3 text-emerald-400" />
+          <CheckCircle className="w-5 h-5 mr-3 text-emerald-400" /> 
           {String(toastMessage)}
         </div>
       )}
       
-      {/* --- SAVING SPINNER --- */}
+      {/* LOADING OVERLAY */}
       {isSaving && (
         <div className="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-slate-900/80 backdrop-blur-xl transition-all">
           <div className="bg-white/10 p-10 rounded-[2.5rem] border border-white/10 flex flex-col items-center shadow-2xl relative overflow-hidden">
@@ -1214,10 +1261,9 @@ export default function App() {
       )}
       
       {/* ========================================================================= */}
-      {/* MODALS AREA */}
+      {/* MODAL AREA */}
       {/* ========================================================================= */}
       
-      {/* MODAL AGENDA */}
       {showAgendaModal && (
         <div className="fixed inset-0 z-[300] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-slate-900/70 backdrop-blur-sm transition-opacity" onClick={() => setShowAgendaModal(false)}></div>
@@ -1225,7 +1271,6 @@ export default function App() {
             <h3 className="font-black text-2xl mb-6 text-slate-800">
               Buat {agendaTypeToEdit === 'harian' ? 'Agenda Harian' : agendaTypeToEdit === 'deadline' ? 'Deadline Tugas' : agendaTypeToEdit === 'ketuatim' ? 'Agenda Katim' : 'Kegiatan Khusus'}
             </h3>
-            
             <form onSubmit={async (e) => {
               e.preventDefault();
               const formHasDeadline = e.target.hasDeadline ? e.target.hasDeadline.checked : false;
@@ -1233,15 +1278,15 @@ export default function App() {
               const hasDeadlineFinal = formHasDeadline || isDeadlineType;
               
               const newData = {
-                type: agendaTypeToEdit,
-                title: e.target.title?.value || '',
-                date: e.target.date?.value || getWitaYYYYMMDD(),
+                type: agendaTypeToEdit, 
+                title: e.target.title?.value || '', 
+                date: e.target.date?.value || getWitaYYYYMMDD(), 
                 time: e.target.time?.value || getWitaHHMM(),
-                loc: e.target.loc?.value || '',
-                hasDeadline: hasDeadlineFinal,
+                loc: e.target.loc?.value || '', 
+                hasDeadline: hasDeadlineFinal, 
                 deadlineDate: hasDeadlineFinal ? e.target.deadlineDate?.value : '',
-                deadlineTime: hasDeadlineFinal ? e.target.deadlineTime?.value : '',
-                pic: agendaTypeToEdit === 'harian' ? currentUserData?.nama : (e.target.pic?.value || 'Semua SDM'),
+                deadlineTime: hasDeadlineFinal ? e.target.deadlineTime?.value : '', 
+                pic: agendaTypeToEdit === 'harian' ? currentUserData?.nama : (e.target.pic?.value || 'Semua SDM'), 
                 supervisi: false
               };
               
@@ -1250,12 +1295,12 @@ export default function App() {
               if (newData.hasDeadline || ['deadline', 'ketuatim', 'khusus'].includes(agendaTypeToEdit)) {
                  const dDate = newData.deadlineDate ? `Batas Waktu: ${newData.deadlineDate} ${newData.deadlineTime} WITA` : '';
                  const taskDesc = `Otomatis dari Agenda. ${newData.loc ? 'Lokasi: '+newData.loc : ''} | ${dDate}`;
-                 await dbAdd('tugasData', {
-                    title: `[${agendaTypeToEdit.toUpperCase()}] ${newData.title}`,
-                    desc: taskDesc,
-                    target: 100,
-                    realisasi: 0,
-                    userRealisasi: {}
+                 await dbAdd('tugasData', { 
+                   title: `[${agendaTypeToEdit.toUpperCase()}] ${newData.title}`, 
+                   desc: taskDesc, 
+                   target: 100, 
+                   realisasi: 0, 
+                   userRealisasi: {} 
                  });
                  showToast("Agenda & Form Progres Tugas Berhasil Dibuat!");
               } else {
@@ -1267,13 +1312,13 @@ export default function App() {
               <div>
                 <label className="block text-xs font-bold text-slate-500 mb-1">Pilih Judul Kegiatan</label>
                 <select name="title" required className={inputClass}>
-                   <option value="">-- Pilih Judul --</option>
-                   {safeAgendaTitlesData.map(t => (
-                     <option key={t.id} value={t.title}>{t.title}</option>
-                   ))}
+                  <option value="">-- Pilih Judul --</option>
+                  {safeAgendaTitlesData.map(t => (
+                    <option key={t.id} value={t.title}>{t.title}</option>
+                  ))}
                 </select>
               </div>
-
+              
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-1">Tanggal Mulai</label>
@@ -1284,7 +1329,7 @@ export default function App() {
                   <input name="time" required type="time" defaultValue={getWitaHHMM()} className={inputClass}/>
                 </div>
               </div>
-
+              
               {agendaTypeToEdit === 'deadline' && (
                 <div className="grid grid-cols-2 gap-4">
                   <div>
@@ -1297,7 +1342,7 @@ export default function App() {
                   </div>
                 </div>
               )}
-
+              
               {agendaTypeToEdit === 'harian' && (
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-1">Lokasi Kegiatan</label>
@@ -1311,7 +1356,7 @@ export default function App() {
                   <input name="pic" defaultValue="Semua SDM" type="text" className={inputClass}/>
                 </div>
               )}
-
+              
               {(agendaTypeToEdit === 'ketuatim' || agendaTypeToEdit === 'khusus') && (
                 <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
                   <label className="flex items-center gap-3 cursor-pointer">
@@ -1320,23 +1365,20 @@ export default function App() {
                       name="hasDeadline" 
                       id="hasDeadlineCheckbox" 
                       className="w-5 h-5 accent-blue-600 cursor-pointer relative z-20" 
-                      onChange={(e) => {
-                         document.getElementById('deadlineFields').style.display = e.target.checked ? 'block' : 'none';
-                      }}
+                      onChange={(e) => { document.getElementById('deadlineFields').style.display = e.target.checked ? 'block' : 'none'; }} 
                     />
                     <span className="font-bold text-sm text-slate-700">Agenda ini memiliki Batas Waktu / Countdown?</span>
                   </label>
-                  
                   <div id="deadlineFields" style={{display: 'none'}} className="mt-4 pt-4 border-t border-slate-200">
-                     <p className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-2">Set Tenggat Waktu (WITA)</p>
-                     <div className="grid grid-cols-2 gap-4">
-                       <input name="deadlineDate" type="date" defaultValue={getWitaYYYYMMDD()} className={inputClass}/>
-                       <input name="deadlineTime" type="time" defaultValue="23:59" className={inputClass}/>
-                     </div>
+                    <p className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-2">Set Tenggat Waktu (WITA)</p>
+                    <div className="grid grid-cols-2 gap-4">
+                      <input name="deadlineDate" type="date" defaultValue={getWitaYYYYMMDD()} className={inputClass}/>
+                      <input name="deadlineTime" type="time" defaultValue="23:59" className={inputClass}/>
+                    </div>
                   </div>
                 </div>
               )}
-
+              
               <div className="flex gap-4 pt-4">
                 <button type="button" onClick={() => setShowAgendaModal(false)} className="flex-1 py-4 bg-slate-100 text-slate-600 rounded-xl font-bold cursor-pointer hover:bg-slate-200 transition-colors">
                   Batal
@@ -1350,7 +1392,6 @@ export default function App() {
         </div>
       )}
 
-      {/* MODAL GENERATOR */}
       {showGeneratorModal && (
         <div className="fixed inset-0 z-[500] flex items-center justify-center p-4">
            <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-sm"></div>
@@ -1359,16 +1400,12 @@ export default function App() {
               <h3 className="font-black text-2xl mb-2 text-slate-800">Menyusun Kalender</h3>
               <p className="text-sm font-bold text-slate-500 mb-6">Membaca hari libur & merandom piket...</p>
               <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
-                 <div 
-                   className="bg-blue-600 h-3 rounded-full transition-all duration-1000" 
-                   style={{width: `${generatorStep * 25}%`}}
-                 ></div>
+                <div className="bg-blue-600 h-3 rounded-full transition-all duration-1000" style={{width: `${generatorStep * 25}%`}}></div>
               </div>
            </div>
         </div>
       )}
 
-      {/* MODAL POTENSIAL */}
       {showPotensialModal && (
         <div className="fixed inset-0 z-[300] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-slate-900/70 backdrop-blur-sm" onClick={() => setShowPotensialModal(false)}></div>
@@ -1378,10 +1415,7 @@ export default function App() {
               e.preventDefault(); 
               const kpmRef = safeKpmData.find(k => String(k.nama) === String(e.target.kpmName.value)); 
               if(kpmRef) { 
-                await dbUpdate('kpmData', kpmRef.id, { 
-                  type: 'potensial', 
-                  potensi: e.target.potensi.value 
-                }); 
+                await dbUpdate('kpmData', kpmRef.id, { type: 'potensial', potensi: e.target.potensi.value }); 
                 setShowPotensialModal(false); 
               } 
             }} className="space-y-5">
@@ -1393,13 +1427,7 @@ export default function App() {
                 </select>
               </div>
               <div>
-                <input 
-                  name="potensi" 
-                  required 
-                  type="text" 
-                  placeholder="Potensi Usaha..." 
-                  className={inputClass} 
-                />
+                <input name="potensi" required type="text" placeholder="Potensi Usaha..." className={inputClass} />
               </div>
               <div className="flex gap-4">
                 <button type="button" onClick={() => setShowPotensialModal(false)} className="flex-1 py-4 bg-slate-100 rounded-xl font-bold cursor-pointer text-slate-700">
@@ -1414,17 +1442,13 @@ export default function App() {
         </div>
       )}
 
-      {/* MODAL SDM */}
       {showSdmModal && (
         <div className="fixed inset-0 z-[300] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-slate-900/70 backdrop-blur-sm" onClick={() => setShowSdmModal(false)}></div>
           <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-2xl relative z-10 p-8 max-h-[90vh] overflow-y-auto animate-in zoom-in-95 custom-scrollbar">
-            <h3 className="font-black text-2xl mb-6">
-              {sdmForm?.id ? 'Edit Profil SDM' : 'Tambah SDM Baru'}
-            </h3>
+            <h3 className="font-black text-2xl mb-6">{sdmForm?.id ? 'Edit Profil SDM' : 'Tambah SDM Baru'}</h3>
             <form onSubmit={async (e) => { 
               e.preventDefault(); 
-              
               const getOrigKey = (obj, includeWords, excludeWords = []) => {
                 if(!obj) return null;
                 const keys = Object.keys(obj);
@@ -1438,7 +1462,7 @@ export default function App() {
                 }
                 return null;
               };
-
+              
               const origNamaKey = getOrigKey(sdmForm, ['nama', 'namapengurus', 'namalengkap', 'namapendamping', 'namasdm'], ['bank']);
               const origNikKey = getOrigKey(sdmForm, ['nik', 'nonik', 'nikktp'], ['keterangan']);
               const origRoleKey = getOrigKey(sdmForm, ['role', 'jabatan', 'tugas'], ['asn']);
@@ -1456,26 +1480,28 @@ export default function App() {
               if(origAsnKey) newData[origAsnKey] = e.target.jabatanAsn.value;
               if(origStatusKey) newData[origStatusKey] = e.target.status.value;
               
-              newData.nama = e.target.nama.value;
-              newData.nik = e.target.nik.value;
-              newData.password = e.target.password.value;
-              newData.role = e.target.role.value;
-              newData.status = e.target.status.value;
+              newData.nama = e.target.nama.value; 
+              newData.nik = e.target.nik.value; 
+              newData.password = e.target.password.value; 
+              newData.role = e.target.role.value; 
+              newData.status = e.target.status.value; 
               newData.jabatanAsn = e.target.jabatanAsn.value;
               
               if (customHeaderKey) {
                 newData[customHeaderKey] = customHeaderVal; 
               }
-
+              
               if (sdmForm && sdmForm.id) {
                 await dbUpdate('sdmData', sdmForm.id, newData); 
               } else {
                 await dbAdd('sdmData', newData); 
               }
+              
               setShowSdmModal(false); 
               setCustomHeaderKey(''); 
               setCustomHeaderVal(''); 
             }} className="space-y-4">
+              
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-2">Nama Lengkap</label>
@@ -1513,6 +1539,7 @@ export default function App() {
                   </select>
                 </div>
               </div>
+              
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-2">Kecamatan <span className="text-red-500">*Otomatis</span></label>
@@ -1527,6 +1554,7 @@ export default function App() {
                   <input name="jmlKpm" type="number" value={Number(sdmForm?.form_jmlKpm || 0)} disabled className={inputClass + ' bg-slate-100 cursor-not-allowed text-slate-500'}/>
                 </div>
               </div>
+              
               {isKorkab && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
@@ -1539,6 +1567,7 @@ export default function App() {
                   </div>
                 </div>
               )}
+              
               <div className="flex gap-4 mt-8">
                 <button type="button" onClick={() => setShowSdmModal(false)} className="flex-1 py-4 bg-slate-100 text-slate-600 rounded-xl font-bold cursor-pointer hover:bg-slate-200 transition-colors">
                   Batal
@@ -1547,6 +1576,7 @@ export default function App() {
                   Simpan Profil
                 </button>
               </div>
+              
             </form>
           </div>
         </div>
