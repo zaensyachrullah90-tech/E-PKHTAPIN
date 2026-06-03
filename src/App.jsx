@@ -259,7 +259,7 @@ export default function App() {
 
   const showToast = (msg) => { 
     setToastMessage(String(msg)); 
-    setTimeout(() => setToastMessage(null), 5000); // Diperpanjang agar pesan error sempat dibaca
+    setTimeout(() => setToastMessage(null), 5000); 
   };
 
   // ====================================================================
@@ -333,7 +333,7 @@ export default function App() {
   };
 
   // ====================================================================
-  // UPLOAD GOOGLE DRIVE 
+  // 🚀 UPLOAD GOOGLE DRIVE (SUPER SAFETY NET - ANTI CORS & HTML PARSE ERROR)
   // ====================================================================
   const uploadFotoKeDrive = async (base64String, namaFoto, subFolder = "Uploads PKH") => {
     const urlGas = aturanPiket?.masterGasUrl || "https://script.google.com/macros/s/AKfycbyiOjCIEeFZAMF4HBZn6SSJP5qFsHcLOIIu-ndIBrGKUtoAchJBIm1rTxH75NmGA2Nd/exec";
@@ -353,21 +353,31 @@ export default function App() {
     try {
       const response = await fetch(urlGas, {
         method: "POST",
-        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        headers: { "Content-Type": "text/plain;charset=utf-8" }, // Wajib text/plain agar tembus CORS
         body: JSON.stringify(payload),
       });
 
-      const result = await response.json();
+      // Mencegah crash jika GAS me-return HTML Error Page (bukan JSON) karena salah setting permission
+      const textResponse = await response.text();
+      let result;
+      try {
+        result = JSON.parse(textResponse);
+      } catch (parseError) {
+        console.error("⛔ GAS Response Error (Non-JSON):", textResponse);
+        showToast("⛔ UPLOAD GAGAL: Aplikasi GAS belum diset 'Execute As: Me' & 'Access: Anyone'.");
+        return null;
+      }
+
       if (result.status === "success") {
-        showToast("Foto berhasil diupload ke Drive!");
+        showToast("✅ Foto berhasil diupload ke Drive!");
         return result.url; 
       } else {
-        showToast("Error dari Drive: " + result.message);
+        showToast("⛔ Error dari Drive: " + result.message);
         return null;
       }
     } catch (error) {
       console.error("Upload error:", error);
-      showToast("Koneksi ke Drive gagal. Pastikan URL GAS benar.");
+      showToast("⛔ Koneksi ke Drive terputus. Pastikan link GAS benar.");
       return null;
     } finally {
       setIsSaving(false);
