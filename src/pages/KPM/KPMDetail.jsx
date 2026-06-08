@@ -152,32 +152,28 @@ export default function KPMDetail({
     });
   };
 
+  // Taruh ini di bagian atas komponen KPMDetail bersama props lainnya
+  // const { ..., uploadToDrive } = props;
+
   const handleUploadFoto = async (e, tipeFoto) => {
     const file = e.target.files[0];
-    if(!file) return;
+    if (!file) return;
 
-    const masterGasUrl = aturanPiket?.masterGasUrl;
-    
-    let folderId = extractIdFromUrl(currentUserData?.userDriveLink);
-    if (!folderId || folderId.length < 10) {
-      folderId = extractIdFromUrl(aturanPiket?.masterDriveId);
-    }
-
-    if(!masterGasUrl || !folderId) {
-      showToast(`Gagal! Cek Pengaturan. GAS: ${masterGasUrl ? 'Ada' : 'KOSONG'}, Drive ID: ${folderId ? 'Ada' : 'KOSONG'}`);
-      return;
+    // Ambil fungsi uploadToDrive dari props (App.jsx)
+    if (!props.uploadToDrive && !uploadToDrive) {
+       showToast("Fungsi upload belum terhubung ke sistem utama.");
+       return;
     }
 
     setUploadingTipe(tipeFoto);
     
     try {
+      showToast("Memproses kompresi gambar...");
       let base64Data = "";
-      let finalMimeType = file.type;
-
+      
+      // Proses Kompresi
       if (file.type.startsWith('image/')) {
-        showToast("Memproses gambar...");
         base64Data = await compressImage(file);
-        finalMimeType = 'image/jpeg';
       } else {
         base64Data = await new Promise((resolve, reject) => {
           const reader = new FileReader();
@@ -186,7 +182,7 @@ export default function KPMDetail({
           reader.readAsDataURL(file);
         });
       }
-      
+
       const mappingFolder = {
         'foto_profil': 'Foto Profil KPM',
         'foto_depan': 'Foto Rumah Depan',
@@ -200,25 +196,32 @@ export default function KPMDetail({
         'berkas_graduasi': 'Berkas Graduasi'
       };
 
-      const payload = { 
-        fileName: `KPM_${displayNik || 'NONIK'}_${tipeFoto}_${Date.now()}.jpg`, 
-        mimeType: finalMimeType, 
-        base64: base64Data,
-        targetFolderId: folderId,
-        subFolder: mappingFolder[tipeFoto] || 'Lain-lain'
-      };
+      const folderName = mappingFolder[tipeFoto] || 'Lain-lain';
+      const fileName = `KPM_${displayNik || 'NONIK'}_${tipeFoto}_${Date.now()}.jpg`;
 
-      const res = await fetch(masterGasUrl, { 
-        method: 'POST', 
-        headers: {
-          "Content-Type": "text/plain;charset=utf-8",
-        },
-        body: JSON.stringify(payload) 
-      });
+      // PANGGIL FUNGSI SAKTI DARI APP.JSX
+      const theUploadFunction = props.uploadToDrive || uploadToDrive;
+      const uploadedUrl = await theUploadFunction(base64Data, fileName, folderName);
+
+      if (uploadedUrl) {
+        // JIKA SUKSES DRIVE, BARU SIMPAN URL-NYA KE FIREBASE
+        const dbNode = selectedKPM.bansos_type === 'PKH' ? 'kpmPkhData' : selectedKPM.bansos_type === 'Sembako' ? 'kpmSembakoData' : 'kpmData';
+        
+        await dbUpdate(dbNode, selectedKPM.id, { [tipeFoto]: uploadedUrl });
+        
+        // Update tampilan di layar
+        setSelectedKPM(prev => ({ ...prev, [tipeFoto]: uploadedUrl }));
+        showToast(`Selesai! Foto tersimpan di folder ${folderName}`);
+      }
       
-      const result = await res.json();
-      
-      if(result.status === 'success' || result.directUrl || result.url) {
+    } catch (err) { 
+      console.error(err);
+      showToast("Terjadi kesalahan saat memproses file."); 
+    } finally { 
+      setUploadingTipe(null); 
+      e.target.value = null; // Reset input file
+    }
+  };
         // =========================================================================
         // PERBAIKAN TUNTAS: Thumbnail API Google Drive agar pasti terbaca di <img>
         // =========================================================================
