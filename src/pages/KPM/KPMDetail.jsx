@@ -151,10 +151,17 @@ export default function KPMDetail({
     });
   };
 
-  // ====================================================================
+// ====================================================================
   // SISTEM UPLOAD FOTO TERINTEGRASI (KE GOOGLE DRIVE PUSAT)
   // ====================================================================
   const handleUploadFoto = async (e, tipeFoto) => {
+    // 1. TAMBAHKAN PENGECEKAN INTERNET DI SINI
+    if (!navigator.onLine) {
+      showToast("⛔ Perangkat Anda sedang offline. Pastikan koneksi internet aktif untuk upload foto.");
+      e.target.value = null;
+      return;
+    }
+
     const file = e.target.files[0];
     if(!file) return;
 
@@ -196,25 +203,90 @@ export default function KPMDetail({
       const folderName = mappingFolder[tipeFoto] || 'Lain-lain';
       const fileName = `KPM_${displayNik || 'NONIK'}_${tipeFoto}_${Date.now()}.jpg`;
 
-      showToast(`Mengirim ${fileName} ke Google Drive...`);
+      showToast(`Mengunggah ${fileName} ke Google Drive...`);
       
       // Panggil fungsi uploadToDrive yang dipassing dari App.jsx
       const uploadedUrl = await uploadToDrive(base64Data, fileName, folderName);
 
       if (uploadedUrl) {
-        // Jika sukses mendapatkan URL, simpan ke Database Firebase
+        showToast("Menyimpan tautan ke database...");
         const dbNode = selectedKPM.bansos_type === 'PKH' ? 'kpmPkhData' : selectedKPM.bansos_type === 'Sembako' ? 'kpmSembakoData' : 'kpmData';
         
         await dbUpdate(dbNode, selectedKPM.id, { [tipeFoto]: uploadedUrl });
         setSelectedKPM(prev => ({ ...prev, [tipeFoto]: uploadedUrl }));
+        showToast("✅ Foto berhasil diunggah dan disimpan!");
+      } else {
+        throw new Error("Gagal mendapatkan URL dari Drive");
       }
       
     } catch (err) { 
       console.error(err);
-      showToast("⛔ Terjadi kesalahan saat memproses file."); 
+      showToast("⛔ Terjadi kesalahan saat memproses file. Pastikan internet stabil."); 
     } finally { 
       setUploadingTipe(null); 
       e.target.value = null; // Reset input file
+    }
+  };
+
+  const handleSaveEdit = async (e) => {
+    e.preventDefault();
+    // TAMBAHKAN PENGECEKAN INTERNET
+    if (!navigator.onLine) {
+      showToast("⛔ Anda sedang offline. Tidak dapat menyimpan biodata.");
+      return;
+    }
+
+    try {
+      const dbNode = selectedKPM.bansos_type === 'PKH' ? 'kpmPkhData' : selectedKPM.bansos_type === 'Sembako' ? 'kpmSembakoData' : 'kpmData';
+      await dbUpdate(dbNode, selectedKPM.id, editForm);
+      Object.keys(editForm).forEach(k => { selectedKPM[k] = editForm[k]; });
+      showToast('Profil KPM berhasil diperbarui!');
+      setIsEditModalOpen(false);
+    } catch (error) {
+      showToast("⛔ Gagal menyimpan ke database. Periksa koneksi Anda.");
+    }
+  };
+
+  const handleSaveGraduasi = async (e) => {
+    e.preventDefault();
+    // TAMBAHKAN PENGECEKAN INTERNET
+    if (!navigator.onLine) {
+      showToast("⛔ Anda sedang offline. Tidak dapat mengubah status KPM.");
+      return;
+    }
+
+    try {
+      const alasan = e.target.alasan.value;
+      const kategoriStatus = e.target.kategori_status.value;
+      
+      let newType = '';
+      if (kategoriStatus.includes('Potensial')) {
+         newType = 'potensial';
+      } else if (kategoriStatus.includes('Graduasi')) {
+         newType = 'graduasi';
+      } else {
+         newType = 'utama'; 
+      }
+
+      const finalStatus = `${kategoriStatus} - ${alasan}`;
+      const dbNode = selectedKPM.bansos_type === 'PKH' ? 'kpmPkhData' : selectedKPM.bansos_type === 'Sembako' ? 'kpmSembakoData' : 'kpmData';
+      
+      await dbUpdate(dbNode, selectedKPM.id, { 
+        type: newType, 
+        status: finalStatus,
+        potensi: newType === 'potensial' ? alasan : (selectedKPM.potensi || '')
+      });
+      
+      setSelectedKPM({
+        ...selectedKPM, 
+        type: newType, 
+        status: finalStatus,
+        potensi: newType === 'potensial' ? alasan : (selectedKPM.potensi || '')
+      });
+      
+      showToast('✅ Pembaruan Status KPM berhasil disimpan!');
+    } catch (error) {
+      showToast("⛔ Gagal menyimpan status. Periksa koneksi Anda.");
     }
   };
 
